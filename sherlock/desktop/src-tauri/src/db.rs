@@ -2,11 +2,12 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
-use rusqlite::{params, params_from_iter, types::Value, Connection};
+use rusqlite::{params, params_from_iter, types::Value, Connection, Row};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::models::{
-    DbStats, ExistingFile, FileRecordUpsert, ParsedQuery, SearchItem, SearchRequest, SearchResponse,
+    DbStats, ExistingFile, FileRecordUpsert, ParsedQuery, ScanJobState, ScanJobStatus, SearchItem,
+    SearchRequest, SearchResponse,
 };
 use crate::query_parser::parse_query;
 
@@ -60,13 +61,51 @@ pub fn init_database(db_path: &Path) -> AppResult<()> {
 
         CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
             filename,
+            rel_path,
             description,
             extracted_text,
             canonical_mentions
         );
+
+        CREATE TABLE IF NOT EXISTS scan_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            root_id INTEGER NOT NULL,
+            root_path TEXT NOT NULL,
+            status TEXT NOT NULL,
+            scan_marker INTEGER NOT NULL,
+            total_files INTEGER NOT NULL DEFAULT 0,
+            processed_files INTEGER NOT NULL DEFAULT 0,
+            added INTEGER NOT NULL DEFAULT 0,
+            modified INTEGER NOT NULL DEFAULT 0,
+            moved INTEGER NOT NULL DEFAULT 0,
+            unchanged INTEGER NOT NULL DEFAULT 0,
+            deleted INTEGER NOT NULL DEFAULT 0,
+            cursor_rel_path TEXT,
+            error_text TEXT,
+            started_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            FOREIGN KEY (root_id) REFERENCES roots(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_scan_jobs_root ON scan_jobs(root_id);
+        CREATE INDEX IF NOT EXISTS idx_scan_jobs_status ON scan_jobs(status);
+        CREATE INDEX IF NOT EXISTS idx_scan_jobs_updated_at ON scan_jobs(updated_at);
         "#,
     )?;
+    ensure_fts_schema(&conn)?;
     Ok(())
+}
+
+pub fn recover_incomplete_scan_jobs(db_path: &Path) -> AppResult<u64> {
+    let conn = Connection::open(db_path)?;
+    let now = now_epoch_secs();
+    let updated = conn.execute(
+        "UPDATE scan_jobs
+         SET status = 'interrupted', updated_at = ?1
+         WHERE status = 'running'",
+        params![now],
+    )?;
+    Ok(updated as u64)
 }
 
 pub fn database_stats(db_path: &Path) -> AppResult<DbStats> {
@@ -114,10 +153,209 @@ pub fn touch_root_scan(db_path: &Path, root_id: i64) -> AppResult<()> {
     Ok(())
 }
 
+pub fn create_or_resume_scan_job(db_path: &Path, root_path: &str) -> AppResult<ScanJobStatus> {
+    let root_id = upsert_root(db_path, root_path)?;
+    let conn = Connection::open(db_path)?;
+    let now = now_epoch_secs();
+
+    let maybe_job_id: Option<i64> = conn
+        .query_row(
+            "SELECT id
+             FROM scan_jobs
+             WHERE root_id = ?1 AND status IN ('running', 'pending', 'interrupted', 'failed')
+             ORDER BY id DESC
+             LIMIT 1",
+            params![root_id],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if let Some(job_id) = maybe_job_id {
+        conn.execute(
+            "UPDATE scan_jobs
+             SET status = 'running', error_text = NULL, updated_at = ?2
+             WHERE id = ?1",
+            params![job_id, now],
+        )?;
+        return get_scan_job(db_path, job_id)?
+            .ok_or_else(|| AppError::Config("missing scan job after resume".to_string()));
+    }
+
+    let scan_marker = now_epoch_millis();
+    conn.execute(
+        "INSERT INTO scan_jobs(
+            root_id, root_path, status, scan_marker,
+            total_files, processed_files, added, modified, moved, unchanged, deleted,
+            cursor_rel_path, error_text, started_at, updated_at, completed_at
+         ) VALUES (
+            ?1, ?2, 'running', ?3,
+            0, 0, 0, 0, 0, 0, 0,
+            NULL, NULL, ?4, ?4, NULL
+         )",
+        params![root_id, root_path, scan_marker, now],
+    )?;
+    let job_id = conn.last_insert_rowid();
+    get_scan_job(db_path, job_id)?
+        .ok_or_else(|| AppError::Config("missing scan job after insert".to_string()))
+}
+
+pub fn list_resumable_scan_jobs(db_path: &Path) -> AppResult<Vec<ScanJobStatus>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT
+            id, root_id, root_path, status, scan_marker, total_files, processed_files,
+            added, modified, moved, unchanged, deleted, cursor_rel_path, error_text,
+            updated_at, started_at, completed_at
+         FROM scan_jobs
+         WHERE status IN ('running', 'pending', 'interrupted')
+         ORDER BY updated_at DESC",
+    )?;
+    let rows = stmt.query_map([], scan_job_from_row)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn get_scan_job(db_path: &Path, job_id: i64) -> AppResult<Option<ScanJobStatus>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT
+            id, root_id, root_path, status, scan_marker, total_files, processed_files,
+            added, modified, moved, unchanged, deleted, cursor_rel_path, error_text,
+            updated_at, started_at, completed_at
+         FROM scan_jobs
+         WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query(params![job_id])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(scan_job_from_row(row)?));
+    }
+    Ok(None)
+}
+
+pub fn get_scan_job_state(db_path: &Path, job_id: i64) -> AppResult<ScanJobState> {
+    let conn = Connection::open(db_path)?;
+    conn.query_row(
+        "SELECT
+            root_id, root_path, scan_marker, processed_files,
+            added, modified, moved, unchanged, cursor_rel_path
+         FROM scan_jobs
+         WHERE id = ?1",
+        params![job_id],
+        |row| {
+            Ok(ScanJobState {
+                root_id: row.get(0)?,
+                root_path: row.get(1)?,
+                scan_marker: row.get(2)?,
+                processed_files: row.get::<_, i64>(3)? as u64,
+                added: row.get::<_, i64>(4)? as u64,
+                modified: row.get::<_, i64>(5)? as u64,
+                moved: row.get::<_, i64>(6)? as u64,
+                unchanged: row.get::<_, i64>(7)? as u64,
+                cursor_rel_path: row.get(8)?,
+            })
+        },
+    )
+    .map_err(AppError::from)
+}
+
+pub fn checkpoint_scan_job(
+    db_path: &Path,
+    job_id: i64,
+    total_files: u64,
+    processed_files: u64,
+    cursor_rel_path: Option<&str>,
+    added: u64,
+    modified: u64,
+    moved: u64,
+    unchanged: u64,
+) -> AppResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute(
+        "UPDATE scan_jobs
+         SET status = 'running',
+             total_files = ?2,
+             processed_files = ?3,
+             cursor_rel_path = ?4,
+             added = ?5,
+             modified = ?6,
+             moved = ?7,
+             unchanged = ?8,
+             updated_at = ?9
+         WHERE id = ?1",
+        params![
+            job_id,
+            total_files as i64,
+            processed_files as i64,
+            cursor_rel_path,
+            added as i64,
+            modified as i64,
+            moved as i64,
+            unchanged as i64,
+            now_epoch_secs()
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn complete_scan_job_by_id(
+    db_path: &Path,
+    job_id: i64,
+    summary: &crate::models::ScanSummary,
+    cursor_rel_path: Option<&str>,
+) -> AppResult<()> {
+    let conn = Connection::open(db_path)?;
+    let now = now_epoch_secs();
+    conn.execute(
+        "UPDATE scan_jobs
+         SET status = 'completed',
+             total_files = ?2,
+             processed_files = ?3,
+             added = ?4,
+             modified = ?5,
+             moved = ?6,
+             unchanged = ?7,
+             deleted = ?8,
+             cursor_rel_path = ?9,
+             updated_at = ?10,
+             completed_at = ?10,
+             error_text = NULL
+         WHERE id = ?1",
+        params![
+            job_id,
+            summary.scanned as i64,
+            summary.scanned as i64,
+            summary.added as i64,
+            summary.modified as i64,
+            summary.moved as i64,
+            summary.unchanged as i64,
+            summary.deleted as i64,
+            cursor_rel_path,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn fail_scan_job(db_path: &Path, job_id: i64, error_text: &str) -> AppResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute(
+        "UPDATE scan_jobs
+         SET status = 'failed',
+             error_text = ?2,
+             updated_at = ?3
+         WHERE id = ?1",
+        params![job_id, truncate_text(error_text, 1500), now_epoch_secs()],
+    )?;
+    Ok(())
+}
+
 pub fn load_existing_files(db_path: &Path, root_id: i64) -> AppResult<Vec<ExistingFile>> {
     let conn = Connection::open(db_path)?;
     let mut stmt = conn.prepare(
-        "SELECT id, rel_path, fingerprint
+        "SELECT id, rel_path, fingerprint, mtime_ns, size_bytes, confidence
          FROM files
          WHERE root_id = ?1 AND deleted_at IS NULL",
     )?;
@@ -127,6 +365,9 @@ pub fn load_existing_files(db_path: &Path, root_id: i64) -> AppResult<Vec<Existi
             id: row.get(0)?,
             rel_path: row.get(1)?,
             fingerprint: row.get(2)?,
+            mtime_ns: row.get(3)?,
+            size_bytes: row.get(4)?,
+            confidence: row.get::<_, f64>(5)? as f32,
         })
     })?;
 
@@ -135,6 +376,53 @@ pub fn load_existing_files(db_path: &Path, root_id: i64) -> AppResult<Vec<Existi
         out.push(row?);
     }
     Ok(out)
+}
+
+pub fn touch_file_scan_marker(
+    db_path: &Path,
+    root_id: i64,
+    rel_path: &str,
+    scan_marker: i64,
+) -> AppResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute(
+        "UPDATE files SET scan_marker = ?1, updated_at = ?2 WHERE root_id = ?3 AND rel_path = ?4",
+        params![scan_marker, now_epoch_secs(), root_id, rel_path],
+    )?;
+    Ok(())
+}
+
+pub fn get_deleted_file_paths(
+    db_path: &Path,
+    root_id: i64,
+    deleted_at: i64,
+) -> AppResult<Vec<(String, Option<String>)>> {
+    let conn = Connection::open(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT rel_path, thumb_path FROM files WHERE root_id = ?1 AND deleted_at = ?2",
+    )?;
+    let rows = stmt.query_map(params![root_id, deleted_at], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn update_file_thumb_path(
+    db_path: &Path,
+    root_id: i64,
+    rel_path: &str,
+    thumb_path: &str,
+) -> AppResult<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute(
+        "UPDATE files SET thumb_path = ?1, updated_at = ?2 WHERE root_id = ?3 AND rel_path = ?4",
+        params![thumb_path, now_epoch_secs(), root_id, rel_path],
+    )?;
+    Ok(())
 }
 
 pub fn upsert_file_record(db_path: &Path, record: &FileRecordUpsert) -> AppResult<i64> {
@@ -253,8 +541,8 @@ fn refresh_fts(conn: &Connection, file_id: i64) -> AppResult<()> {
     conn.execute("DELETE FROM files_fts WHERE rowid = ?1", params![file_id])?;
     conn.execute(
         r#"
-        INSERT INTO files_fts (rowid, filename, description, extracted_text, canonical_mentions)
-        SELECT id, filename, description, extracted_text, canonical_mentions
+        INSERT INTO files_fts (rowid, filename, rel_path, description, extracted_text, canonical_mentions)
+        SELECT id, filename, rel_path, description, extracted_text, canonical_mentions
         FROM files
         WHERE id = ?1
         "#,
@@ -266,7 +554,33 @@ fn refresh_fts(conn: &Connection, file_id: i64) -> AppResult<()> {
 pub fn search_images(db_path: &Path, request: &SearchRequest) -> AppResult<SearchResponse> {
     let parsed = parse_query(&request.query);
     let normalized = normalize_request(request, &parsed);
-    search_images_normalized(db_path, normalized, parsed)
+    let inferred_media = request.media_types.is_empty() && !parsed.media_types.is_empty();
+    let inferred_conf = request.min_confidence.is_none() && parsed.min_confidence.is_some();
+    let inferred_date_from = request.date_from.is_none() && parsed.date_from.is_some();
+    let inferred_date_to = request.date_to.is_none() && parsed.date_to.is_some();
+
+    let initial = search_images_normalized(db_path, normalized.clone(), parsed.clone())?;
+    if initial.total > 0
+        || !(inferred_media || inferred_conf || inferred_date_from || inferred_date_to)
+    {
+        return Ok(initial);
+    }
+
+    // If parser-inferred filters are over-restrictive, retry with relaxed constraints.
+    let mut relaxed = normalized;
+    if inferred_media {
+        relaxed.media_types.clear();
+    }
+    if inferred_conf {
+        relaxed.min_confidence = None;
+    }
+    if inferred_date_from {
+        relaxed.date_from = None;
+    }
+    if inferred_date_to {
+        relaxed.date_to = None;
+    }
+    search_images_normalized(db_path, relaxed, parsed)
 }
 
 fn normalize_request(request: &SearchRequest, parsed: &ParsedQuery) -> SearchRequest {
@@ -297,8 +611,9 @@ fn search_images_normalized(
     let conn = Connection::open(db_path)?;
     let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = request.offset.unwrap_or(0);
-    let query = request.query.trim();
-    let has_query = !query.is_empty();
+    let query = request.query.trim().to_string();
+    let fts_query = to_fts_query(&query);
+    let has_query = !fts_query.is_empty();
 
     let mut from_sql = String::from(" FROM files f ");
     let mut where_clauses = vec!["f.deleted_at IS NULL".to_string()];
@@ -307,7 +622,7 @@ fn search_images_normalized(
     if has_query {
         from_sql.push_str(" JOIN files_fts ON files_fts.rowid = f.id ");
         where_clauses.push("files_fts MATCH ?".to_string());
-        bind_values.push(Value::Text(to_fts_query(query)));
+        bind_values.push(Value::Text(fts_query));
     }
 
     if !request.root_scope.is_empty() {
@@ -393,6 +708,36 @@ fn search_images_normalized(
     })
 }
 
+fn scan_job_from_row(row: &Row<'_>) -> rusqlite::Result<ScanJobStatus> {
+    let total_files = row.get::<_, i64>(5)? as u64;
+    let processed_files = row.get::<_, i64>(6)? as u64;
+    let progress_pct = if total_files == 0 {
+        0.0
+    } else {
+        ((processed_files as f32 / total_files as f32) * 100.0).clamp(0.0, 100.0)
+    };
+    Ok(ScanJobStatus {
+        id: row.get(0)?,
+        root_id: row.get(1)?,
+        root_path: row.get(2)?,
+        status: row.get(3)?,
+        scan_marker: row.get(4)?,
+        total_files,
+        processed_files,
+        progress_pct,
+        added: row.get::<_, i64>(7)? as u64,
+        modified: row.get::<_, i64>(8)? as u64,
+        moved: row.get::<_, i64>(9)? as u64,
+        unchanged: row.get::<_, i64>(10)? as u64,
+        deleted: row.get::<_, i64>(11)? as u64,
+        cursor_rel_path: row.get(12)?,
+        error_text: row.get(13)?,
+        updated_at: row.get(14)?,
+        started_at: row.get(15)?,
+        completed_at: row.get(16)?,
+    })
+}
+
 fn normalize_media_types(values: &[String]) -> Vec<String> {
     let allowed = [
         "anime",
@@ -426,19 +771,79 @@ fn parse_date_end_ns(value: &str) -> Option<i64> {
 }
 
 fn to_fts_query(input: &str) -> String {
-    input
+    let tokens = input
         .split_whitespace()
-        .map(|token| token.replace('"', ""))
+        .map(sanitize_fts_token)
         .filter(|token| !token.is_empty())
-        .map(|token| format!(r#""{token}"*"#))
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return String::new();
+    }
+    // Use OR to keep broad natural-language queries from over-filtering sparse metadata.
+    tokens
+        .into_iter()
+        .map(|token| format!("{token}*"))
         .collect::<Vec<_>>()
-        .join(" AND ")
+        .join(" OR ")
+}
+
+fn sanitize_fts_token(token: &str) -> String {
+    token
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn ensure_fts_schema(conn: &Connection) -> AppResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(files_fts)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let has_rel_path = columns.iter().any(|c| c == "rel_path");
+
+    if !has_rel_path {
+        conn.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS files_fts;
+            CREATE VIRTUAL TABLE files_fts USING fts5(
+                filename,
+                rel_path,
+                description,
+                extracted_text,
+                canonical_mentions
+            );
+            INSERT INTO files_fts (rowid, filename, rel_path, description, extracted_text, canonical_mentions)
+            SELECT id, filename, rel_path, description, extracted_text, canonical_mentions
+            FROM files;
+            "#,
+        )?;
+    }
+    Ok(())
+}
+
+fn truncate_text(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    value.chars().take(max).collect()
 }
 
 fn now_epoch_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub fn now_epoch_secs_pub() -> i64 {
+    now_epoch_secs()
+}
+
+fn now_epoch_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
 
@@ -540,5 +945,161 @@ mod tests {
         let result = search_images(&db_path, &req).expect("search");
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].media_type, "anime");
+    }
+
+    #[test]
+    fn falls_back_when_parser_filters_are_too_strict() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+        let rec = FileRecordUpsert {
+            root_id,
+            rel_path: "images/ranma.jpg".to_string(),
+            abs_path: "/tmp/demo/images/ranma.jpg".to_string(),
+            filename: "ranma.jpg".to_string(),
+            media_type: "other".to_string(),
+            description: "Character poster".to_string(),
+            extracted_text: String::new(),
+            canonical_mentions: String::new(),
+            confidence: 0.0,
+            lang_hint: "unknown".to_string(),
+            mtime_ns: 1_700_000_000_000_000_000,
+            size_bytes: 10_000,
+            fingerprint: "fp-2".to_string(),
+            scan_marker: 123,
+        };
+        upsert_file_record(&db_path, &rec).expect("upsert");
+
+        // Query parser infers media_type=anime, which would otherwise hide this file.
+        let req = SearchRequest {
+            query: "anime ranma".to_string(),
+            limit: Some(20),
+            offset: Some(0),
+            ..SearchRequest::default()
+        };
+        let result = search_images(&db_path, &req).expect("search");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].rel_path, "images/ranma.jpg");
+    }
+
+    #[test]
+    fn touch_scan_marker_preserves_classification() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+        let rec = FileRecordUpsert {
+            root_id,
+            rel_path: "a.jpg".to_string(),
+            abs_path: "/tmp/demo/a.jpg".to_string(),
+            filename: "a.jpg".to_string(),
+            media_type: "anime".to_string(),
+            description: "test desc".to_string(),
+            extracted_text: "ocr text".to_string(),
+            canonical_mentions: "Ranma".to_string(),
+            confidence: 0.85,
+            lang_hint: "en".to_string(),
+            mtime_ns: 100,
+            size_bytes: 200,
+            fingerprint: "fp1".to_string(),
+            scan_marker: 1,
+        };
+        upsert_file_record(&db_path, &rec).expect("upsert");
+        touch_file_scan_marker(&db_path, root_id, "a.jpg", 2).expect("touch");
+
+        let conn = Connection::open(&db_path).expect("open");
+        let (media_type, conf, marker): (String, f64, i64) = conn
+            .query_row(
+                "SELECT media_type, confidence, scan_marker FROM files WHERE root_id = ?1 AND rel_path = ?2",
+                params![root_id, "a.jpg"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("query");
+        assert_eq!(media_type, "anime");
+        assert!((conf - 0.85).abs() < 0.01);
+        assert_eq!(marker, 2);
+    }
+
+    #[test]
+    fn load_existing_files_includes_mtime_size() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+        let rec = FileRecordUpsert {
+            root_id,
+            rel_path: "b.jpg".to_string(),
+            abs_path: "/tmp/demo/b.jpg".to_string(),
+            filename: "b.jpg".to_string(),
+            media_type: "photo".to_string(),
+            description: String::new(),
+            extracted_text: String::new(),
+            canonical_mentions: String::new(),
+            confidence: 0.0,
+            lang_hint: "unknown".to_string(),
+            mtime_ns: 999,
+            size_bytes: 5000,
+            fingerprint: "fp-x".to_string(),
+            scan_marker: 10,
+        };
+        upsert_file_record(&db_path, &rec).expect("upsert");
+        let files = load_existing_files(&db_path, root_id).expect("load");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].mtime_ns, 999);
+        assert_eq!(files[0].size_bytes, 5000);
+    }
+
+    #[test]
+    fn get_deleted_file_paths_returns_deleted() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+        let rec = FileRecordUpsert {
+            root_id,
+            rel_path: "del.jpg".to_string(),
+            abs_path: "/tmp/demo/del.jpg".to_string(),
+            filename: "del.jpg".to_string(),
+            media_type: "other".to_string(),
+            description: String::new(),
+            extracted_text: String::new(),
+            canonical_mentions: String::new(),
+            confidence: 0.0,
+            lang_hint: "unknown".to_string(),
+            mtime_ns: 100,
+            size_bytes: 100,
+            fingerprint: "fp-del".to_string(),
+            scan_marker: 5,
+        };
+        upsert_file_record(&db_path, &rec).expect("upsert");
+        mark_missing_as_deleted(&db_path, root_id, 99).expect("delete");
+
+        let conn = Connection::open(&db_path).expect("open");
+        let deleted_at: i64 = conn
+            .query_row(
+                "SELECT deleted_at FROM files WHERE root_id = ?1 AND rel_path = 'del.jpg'",
+                params![root_id],
+                |r| r.get(0),
+            )
+            .expect("q");
+
+        let paths = get_deleted_file_paths(&db_path, root_id, deleted_at).expect("get");
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].0, "del.jpg");
+    }
+
+    #[test]
+    fn creates_and_recovers_scan_jobs() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        let job = create_or_resume_scan_job(&db_path, "/tmp/demo").expect("job");
+        assert_eq!(job.status, "running");
+        checkpoint_scan_job(&db_path, job.id, 20, 7, Some("a.jpg"), 1, 2, 0, 4).expect("ckpt");
+        fail_scan_job(&db_path, job.id, "failure").expect("fail");
+
+        let resumed = create_or_resume_scan_job(&db_path, "/tmp/demo").expect("resume");
+        assert_eq!(resumed.id, job.id);
+        assert_eq!(resumed.status, "running");
+
+        let changed = recover_incomplete_scan_jobs(&db_path).expect("recover");
+        assert!(changed >= 1);
     }
 }

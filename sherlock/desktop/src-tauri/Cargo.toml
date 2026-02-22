@@ -30,6 +30,9 @@ sha2 = "0.10"
 tauri = { version = "2.9.4", features = [] }
 tauri-plugin-log = "2"
 thiserror = "1"
+ureq = { version = "2", features = ["json"] }
+image = "0.25"
+base64 = "0.22"
 walkdir = "2"
 
 [dev-dependencies]

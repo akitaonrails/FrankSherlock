@@ -41,16 +41,25 @@ export type SearchRequest = {
   dateTo?: string;
 };
 
-export type ScanSummary = {
+export type ScanJobStatus = {
+  id: number;
   rootId: number;
   rootPath: string;
-  scanned: number;
+  status: "pending" | "running" | "interrupted" | "completed" | "failed";
+  scanMarker: number;
+  totalFiles: number;
+  processedFiles: number;
+  progressPct: number;
   added: number;
   modified: number;
   moved: number;
   unchanged: number;
   deleted: number;
-  elapsedMs: number;
+  cursorRelPath?: string | null;
+  errorText?: string | null;
+  updatedAt: number;
+  startedAt: number;
+  completedAt?: number | null;
 };
 
 export type DbStats = {
@@ -61,6 +70,30 @@ export type DbStats = {
 export type CleanupResult = {
   runningModels: number;
   stoppedModels: number;
+};
+
+export type RuntimeStatus = {
+  currentModel?: string | null;
+  loadedModels: string[];
+  vramUsedMib?: number | null;
+  vramTotalMib?: number | null;
+  ollamaAvailable: boolean;
+};
+
+export type SetupDownloadStatus = {
+  status: "idle" | "running" | "completed" | "failed";
+  model?: string | null;
+  progressPct: number;
+  message: string;
+};
+
+export type SetupStatus = {
+  isReady: boolean;
+  ollamaAvailable: boolean;
+  requiredModels: string[];
+  missingModels: string[];
+  instructions: string[];
+  download: SetupDownloadStatus;
 };
 
 export type AppPaths = {

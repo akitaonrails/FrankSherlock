@@ -107,6 +107,72 @@ pub struct ScanSummary {
     pub elapsed_ms: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanJobStatus {
+    pub id: i64,
+    pub root_id: i64,
+    pub root_path: String,
+    pub status: String,
+    pub scan_marker: i64,
+    pub total_files: u64,
+    pub processed_files: u64,
+    pub progress_pct: f32,
+    pub added: u64,
+    pub modified: u64,
+    pub moved: u64,
+    pub unchanged: u64,
+    pub deleted: u64,
+    pub cursor_rel_path: Option<String>,
+    pub error_text: Option<String>,
+    pub updated_at: i64,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanJobState {
+    pub root_id: i64,
+    pub root_path: String,
+    pub scan_marker: i64,
+    pub processed_files: u64,
+    pub added: u64,
+    pub modified: u64,
+    pub moved: u64,
+    pub unchanged: u64,
+    pub cursor_rel_path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeStatus {
+    pub current_model: Option<String>,
+    pub loaded_models: Vec<String>,
+    pub vram_used_mib: Option<u64>,
+    pub vram_total_mib: Option<u64>,
+    pub ollama_available: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupDownloadStatus {
+    pub status: String,
+    pub model: Option<String>,
+    pub progress_pct: f32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupStatus {
+    pub is_ready: bool,
+    pub ollama_available: bool,
+    pub required_models: Vec<String>,
+    pub missing_models: Vec<String>,
+    pub instructions: Vec<String>,
+    pub download: SetupDownloadStatus,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileRecordUpsert {
     pub root_id: i64,
@@ -130,4 +196,28 @@ pub struct ExistingFile {
     pub id: i64,
     pub rel_path: String,
     pub fingerprint: String,
+    pub mtime_ns: i64,
+    pub size_bytes: i64,
+    #[allow(dead_code)] // Used for has_classification checks in future
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanContext {
+    pub db_path: std::path::PathBuf,
+    pub thumbnails_dir: std::path::PathBuf,
+    pub tmp_dir: std::path::PathBuf,
+    pub surya_venv_dir: std::path::PathBuf,
+    pub surya_script: std::path::PathBuf,
+    pub model: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassificationResult {
+    pub media_type: String,
+    pub description: String,
+    pub extracted_text: String,
+    pub canonical_mentions: String,
+    pub confidence: f32,
+    pub lang_hint: String,
 }

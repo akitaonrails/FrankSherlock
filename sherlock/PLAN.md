@@ -125,6 +125,14 @@ Runtime user data (outside repo):
   - harder cross-root search and ranking; federated query complexity.
 - Chosen: global SQLite with `root_id` partitioning + per-root maintenance commands.
 
+## Future Multimodal Retrieval Guardrails
+- Keep one global DB, but do not merge all modalities into one unstructured text blob.
+- Store modality-specific content as segments/chunks (OCR blocks, transcript chunks, video scene text) and retrieve at segment level.
+- Collapse segment hits back to file-level results to avoid long transcripts dominating rankings.
+- Apply modality-aware routing/boosting from query intent (`transcript`, `receipt`, `anime`, etc.).
+- Use confidence-aware ranking (ASR/OCR/classifier confidence) to downweight noisy extracted text.
+- Keep strict pagination and capped candidate windows before any expensive rerank.
+
 ## Implementation Phases
 - Phase A: Bootstrap project skeleton under `sherlock/` (Tauri + Python backend contracts).
 - Phase B: Scanner + manifest cache + incremental/rename detection.
