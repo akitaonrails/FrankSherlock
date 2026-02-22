@@ -48,3 +48,8 @@ Thumbs.db
 
 # uv
 uv.lock
+
+# Local build caches for sandboxed runs
+.cargo-local/
+.npm-local/
+.cache-local/

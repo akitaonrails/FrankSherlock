@@ -1,0 +1,36 @@
+[package]
+name = "sherlock_app"
+version = "0.1.0"
+description = "Frank Sherlock desktop application"
+authors = ["AkitaOnRails"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "sherlock_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["clock"] }
+dirs = "5"
+hex = "0.4"
+log = "0.4"
+regex = "1"
+rusqlite = { version = "0.31", features = ["bundled", "modern_sqlite"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tauri = { version = "2.9.4", features = [] }
+tauri-plugin-log = "2"
+thiserror = "1"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"
