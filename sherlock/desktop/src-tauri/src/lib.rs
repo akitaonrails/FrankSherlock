@@ -714,14 +714,31 @@ fn resolve_surya_script(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
 }
 
 fn resolve_pdfium_lib(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
-    // In production builds, PDFium is bundled as a Tauri resource.
+    let lib_name = platform::pdfium_lib_name();
+
+    // macOS: Tauri places frameworks in Contents/Frameworks/ (ad-hoc signed).
+    if cfg!(target_os = "macos") {
+        if let Ok(resource_dir) = app_handle.path().resource_dir() {
+            // resource_dir points to Contents/Resources/; Frameworks is a sibling.
+            let frameworks_dir = resource_dir
+                .parent()
+                .map(|p| p.join("Frameworks"));
+            if let Some(fw) = frameworks_dir {
+                if fw.join(lib_name).exists() {
+                    return fw;
+                }
+            }
+        }
+    }
+
+    // Linux/Windows: PDFium is bundled as a Tauri resource under lib/.
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
         let lib_dir = resource_dir.join("lib");
-        let bundled = lib_dir.join(platform::pdfium_lib_name());
-        if bundled.exists() {
+        if lib_dir.join(lib_name).exists() {
             return lib_dir;
         }
     }
+
     // Dev fallback: look in src-tauri/lib/
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib")
 }

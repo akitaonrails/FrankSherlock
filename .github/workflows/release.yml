@@ -96,6 +96,12 @@ jobs:
             ### Prerequisites
             - [Ollama](https://ollama.com) must be installed and running locally
             - The app will prompt you to download the required model (`qwen2.5vl:7b`) on first launch
+
+            ### macOS first launch
+            The app is ad-hoc signed (no Apple Developer certificate). On first launch, **right-click the app → Open** to bypass Gatekeeper. You only need to do this once.
+
+            ### Windows first launch
+            The installer is not code-signed. Windows SmartScreen may show a warning — click **"More info"** then **"Run anyway"** to proceed. You only need to do this once.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.rust_target }}
