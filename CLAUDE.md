@@ -39,7 +39,7 @@ From `sherlock/desktop/`:
 ```bash
 npm install                    # frontend deps
 cargo build                    # rust backend (from src-tauri/)
-cargo test                     # 69 unit tests
+cargo test                     # 76 unit tests
 npm run tauri:dev              # launch dev mode
 npm run test                   # 84 frontend tests
 npm run tauri:build            # produce AppImage/DMG/MSI
@@ -94,13 +94,24 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 npm run tauri:dev
 
 ```bash
 # Rust (from sherlock/desktop/src-tauri/)
-cargo test                     # 69 tests
+cargo test                     # 76 tests
 
 # Frontend (from sherlock/desktop/)
 npm run test                   # 84 tests
 ```
 
 Tests cover: JSON parsing fallbacks, thumbnail generation, incremental scan discovery, DB operations (upsert, touch, delete, FTS), query parsing, scan job persistence, platform abstraction, and all UI components. Shared test fixtures live in `src/__tests__/fixtures.ts`.
+
+## Database Migration Rules
+
+Schema is managed by `rusqlite_migration` in `db.rs`. Migrations are tracked via `PRAGMA user_version`.
+
+- Never edit or reorder existing migrations — they are identified by position.
+- Never modify existing `CREATE TABLE` column definitions in a shipped migration.
+- To add a column: append a new `M::up("ALTER TABLE ... ADD COLUMN ... DEFAULT ...")`.
+- Every migration must be safe to run on an existing database (idempotent where possible).
+- Test with both fresh databases and existing databases.
+- Never delete data or drop columns without explicit user consent.
 
 ## What NOT to Change
 

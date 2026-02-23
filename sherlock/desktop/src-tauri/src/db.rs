@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OpenFlags, Row};
+use rusqlite_migration::{HookError, Migrations, M};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
@@ -53,86 +54,109 @@ fn is_readonly_error(e: &AppError) -> bool {
 }
 
 pub fn init_database(db_path: &Path) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "temp_store", "MEMORY")?;
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS roots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            root_path TEXT NOT NULL UNIQUE,
-            root_name TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            last_scan_at INTEGER
-        );
+    run_migrations(&mut conn)?;
+    Ok(())
+}
 
-        CREATE TABLE IF NOT EXISTS files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            root_id INTEGER NOT NULL,
-            rel_path TEXT NOT NULL,
-            filename TEXT NOT NULL,
-            abs_path TEXT NOT NULL,
-            media_type TEXT NOT NULL DEFAULT 'other',
-            description TEXT NOT NULL DEFAULT '',
-            extracted_text TEXT NOT NULL DEFAULT '',
-            canonical_mentions TEXT NOT NULL DEFAULT '',
-            confidence REAL NOT NULL DEFAULT 0.0,
-            lang_hint TEXT NOT NULL DEFAULT 'unknown',
-            mtime_ns INTEGER NOT NULL,
-            size_bytes INTEGER NOT NULL,
-            fingerprint TEXT NOT NULL,
-            thumb_path TEXT,
-            scan_marker INTEGER NOT NULL DEFAULT 0,
-            updated_at INTEGER NOT NULL,
-            deleted_at INTEGER,
-            UNIQUE(root_id, rel_path),
-            FOREIGN KEY (root_id) REFERENCES roots(id) ON DELETE CASCADE
-        );
+fn run_migrations(conn: &mut Connection) -> AppResult<()> {
+    let migrations = Migrations::new(vec![
+        // Migration 0: Full initial schema.
+        // Uses IF NOT EXISTS so it works on both fresh and pre-migration databases
+        // (where user_version is 0 but tables already exist).
+        M::up_with_hook(
+            r#"
+            CREATE TABLE IF NOT EXISTS roots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                root_path TEXT NOT NULL UNIQUE,
+                root_name TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_scan_at INTEGER
+            );
 
-        CREATE INDEX IF NOT EXISTS idx_files_root ON files(root_id);
-        CREATE INDEX IF NOT EXISTS idx_files_media_type ON files(media_type);
-        CREATE INDEX IF NOT EXISTS idx_files_confidence ON files(confidence);
-        CREATE INDEX IF NOT EXISTS idx_files_updated_at ON files(updated_at);
-        CREATE INDEX IF NOT EXISTS idx_files_fingerprint ON files(fingerprint);
-        CREATE INDEX IF NOT EXISTS idx_files_deleted_at ON files(deleted_at);
-        CREATE INDEX IF NOT EXISTS idx_files_mtime_ns ON files(mtime_ns);
-        CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
+            CREATE TABLE IF NOT EXISTS files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                root_id INTEGER NOT NULL,
+                rel_path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                abs_path TEXT NOT NULL,
+                media_type TEXT NOT NULL DEFAULT 'other',
+                description TEXT NOT NULL DEFAULT '',
+                extracted_text TEXT NOT NULL DEFAULT '',
+                canonical_mentions TEXT NOT NULL DEFAULT '',
+                confidence REAL NOT NULL DEFAULT 0.0,
+                lang_hint TEXT NOT NULL DEFAULT 'unknown',
+                mtime_ns INTEGER NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                fingerprint TEXT NOT NULL,
+                thumb_path TEXT,
+                scan_marker INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                deleted_at INTEGER,
+                UNIQUE(root_id, rel_path),
+                FOREIGN KEY (root_id) REFERENCES roots(id) ON DELETE CASCADE
+            );
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
-            filename,
-            rel_path,
-            description,
-            extracted_text,
-            canonical_mentions
-        );
+            CREATE INDEX IF NOT EXISTS idx_files_root ON files(root_id);
+            CREATE INDEX IF NOT EXISTS idx_files_media_type ON files(media_type);
+            CREATE INDEX IF NOT EXISTS idx_files_confidence ON files(confidence);
+            CREATE INDEX IF NOT EXISTS idx_files_updated_at ON files(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_files_fingerprint ON files(fingerprint);
+            CREATE INDEX IF NOT EXISTS idx_files_deleted_at ON files(deleted_at);
+            CREATE INDEX IF NOT EXISTS idx_files_mtime_ns ON files(mtime_ns);
+            CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
 
-        CREATE TABLE IF NOT EXISTS scan_jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            root_id INTEGER NOT NULL,
-            root_path TEXT NOT NULL,
-            status TEXT NOT NULL,
-            scan_marker INTEGER NOT NULL,
-            total_files INTEGER NOT NULL DEFAULT 0,
-            processed_files INTEGER NOT NULL DEFAULT 0,
-            added INTEGER NOT NULL DEFAULT 0,
-            modified INTEGER NOT NULL DEFAULT 0,
-            moved INTEGER NOT NULL DEFAULT 0,
-            unchanged INTEGER NOT NULL DEFAULT 0,
-            deleted INTEGER NOT NULL DEFAULT 0,
-            cursor_rel_path TEXT,
-            error_text TEXT,
-            started_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            completed_at INTEGER,
-            FOREIGN KEY (root_id) REFERENCES roots(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_scan_jobs_root ON scan_jobs(root_id);
-        CREATE INDEX IF NOT EXISTS idx_scan_jobs_status ON scan_jobs(status);
-        CREATE INDEX IF NOT EXISTS idx_scan_jobs_updated_at ON scan_jobs(updated_at);
-        "#,
-    )?;
-    ensure_fts_schema(&conn)?;
+            CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+                filename,
+                rel_path,
+                description,
+                extracted_text,
+                canonical_mentions
+            );
+
+            CREATE TABLE IF NOT EXISTS scan_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                root_id INTEGER NOT NULL,
+                root_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                scan_marker INTEGER NOT NULL,
+                total_files INTEGER NOT NULL DEFAULT 0,
+                processed_files INTEGER NOT NULL DEFAULT 0,
+                added INTEGER NOT NULL DEFAULT 0,
+                modified INTEGER NOT NULL DEFAULT 0,
+                moved INTEGER NOT NULL DEFAULT 0,
+                unchanged INTEGER NOT NULL DEFAULT 0,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                cursor_rel_path TEXT,
+                error_text TEXT,
+                started_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                FOREIGN KEY (root_id) REFERENCES roots(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_scan_jobs_root ON scan_jobs(root_id);
+            CREATE INDEX IF NOT EXISTS idx_scan_jobs_status ON scan_jobs(status);
+            CREATE INDEX IF NOT EXISTS idx_scan_jobs_updated_at ON scan_jobs(updated_at);
+            "#,
+            |conn| ensure_fts_schema(conn).map_err(|e| HookError::Hook(e.to_string())),
+        ),
+        // -------------------------------------------------------------------
+        // HOW TO ADD A NEW MIGRATION:
+        // 1. Append a new M::up("...") entry here. Never edit or reorder
+        //    existing migrations — they are identified by position.
+        // 2. Each migration runs inside a transaction. Keep statements small
+        //    and idempotent where possible.
+        // 3. Example:
+        //    M::up("ALTER TABLE files ADD COLUMN tags TEXT NOT NULL DEFAULT '';"),
+        // -------------------------------------------------------------------
+    ]);
+
+    migrations
+        .to_latest(conn)
+        .map_err(|e| AppError::Config(format!("migration error: {e}")))?;
     Ok(())
 }
 
@@ -1809,6 +1833,62 @@ mod tests {
         let res = search_images(&db_path, &req).expect("search");
         let types: Vec<&str> = res.items.iter().map(|i| i.media_type.as_str()).collect();
         assert_eq!(types, vec!["anime", "document", "photo"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Migration tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_migrations_apply_to_fresh_db() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        let conn = open_conn(&db_path).expect("open");
+        // Verify user_version is set (migration 0 applied → version 1)
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .expect("user_version");
+        assert_eq!(version, 1);
+
+        // Verify all tables exist
+        let tables: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .expect("prepare");
+            stmt.query_map([], |r| r.get(0))
+                .expect("query")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("collect")
+        };
+        assert!(tables.contains(&"roots".to_string()));
+        assert!(tables.contains(&"files".to_string()));
+        assert!(tables.contains(&"scan_jobs".to_string()));
+        assert!(tables.contains(&"files_fts".to_string()));
+    }
+
+    #[test]
+    fn test_migrations_idempotent() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("first init");
+        init_database(&db_path).expect("second init should be no-op");
+
+        let stats = database_stats(&db_path).expect("stats");
+        assert_eq!(stats.roots, 0);
+        assert_eq!(stats.files, 0);
+    }
+
+    #[test]
+    fn test_schema_version_set() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        let conn = open_conn(&db_path).expect("open");
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .expect("user_version");
+        // We have 1 migration (index 0), so user_version should be 1
+        assert_eq!(version, 1);
     }
 
     #[test]
