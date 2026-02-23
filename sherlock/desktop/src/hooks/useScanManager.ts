@@ -210,6 +210,8 @@ export function useScanManager(cb: ScanManagerCallbacks) {
     try {
       await cancelScan(scan.id);
       cb.setNotice(`Cancelling scan for ${basename(scan.rootPath)}...`);
+      // Poll immediately to pick up the interrupted status faster
+      await pollRuntimeAndScans();
     } catch (err) {
       cb.setError(errorMessage(err));
     }

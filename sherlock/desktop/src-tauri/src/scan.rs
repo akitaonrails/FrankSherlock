@@ -129,6 +129,11 @@ fn run_scan_job_internal(
             }
         }
 
+        // Helper: check cancel flag after slow operations
+        let is_cancelled = || -> bool {
+            cancel_flag.map_or(false, |f| f.load(Ordering::Relaxed))
+        };
+
         match probe.status {
             FileStatus::Unchanged => {
                 // Only update scan marker, skip everything else
@@ -138,6 +143,16 @@ fn run_scan_job_internal(
             FileStatus::Modified => {
                 // Re-classify and regenerate thumbnail
                 let classification = classify_and_thumbnail(ctx, probe, job.root_id);
+                if is_cancelled() {
+                    db::cancel_scan_job(db_path, job_id)?;
+                    return Ok(ScanSummary {
+                        root_id: job.root_id,
+                        root_path: root_path.display().to_string(),
+                        scanned: processed_files,
+                        added, modified, moved, unchanged, deleted: 0,
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                    });
+                }
                 let record = probe_to_record(job.root_id, job.scan_marker, probe, &classification);
                 db::upsert_file_record(db_path, &record)?;
                 if let Some(ref thumb) = classification.thumb_path {
@@ -200,6 +215,16 @@ fn run_scan_job_internal(
 
                 // Genuinely new file — classify
                 let classification = classify_and_thumbnail(ctx, probe, job.root_id);
+                if is_cancelled() {
+                    db::cancel_scan_job(db_path, job_id)?;
+                    return Ok(ScanSummary {
+                        root_id: job.root_id,
+                        root_path: root_path.display().to_string(),
+                        scanned: processed_files,
+                        added, modified, moved, unchanged, deleted: 0,
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                    });
+                }
                 let record = probe_to_record(job.root_id, job.scan_marker, probe, &classification);
                 db::upsert_file_record(db_path, &record)?;
                 if let Some(ref thumb) = classification.thumb_path {
