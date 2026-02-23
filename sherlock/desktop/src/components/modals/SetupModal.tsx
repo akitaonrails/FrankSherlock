@@ -1,5 +1,6 @@
 import type { SetupStatus } from "../../types";
 import ModalOverlay from "./ModalOverlay";
+import "./shared-modal.css";
 import "./SetupModal.css";
 
 type Props = {
@@ -11,7 +12,7 @@ type Props = {
 export default function SetupModal({ setup, onRecheck, onDownload }: Props) {
   return (
     <ModalOverlay>
-      <div className="setup-modal">
+      <div className="modal-base setup-modal">
         <h2>First-Time Setup</h2>
         <p>Sherlock needs local Ollama service and required model(s) before scanning.</p>
         <div className="setup-status-grid">
@@ -48,7 +49,7 @@ export default function SetupModal({ setup, onRecheck, onDownload }: Props) {
           <span>{setup.download.progressPct.toFixed(1)}%</span>
         </div>
         <p className="setup-download-text">{setup.download.message}</p>
-        <div className="setup-actions">
+        <div className="modal-actions">
           <button type="button" onClick={onRecheck}>Recheck</button>
           <button
             type="button"

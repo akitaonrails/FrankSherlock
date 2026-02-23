@@ -95,6 +95,16 @@ struct OllamaResponse {
     total_duration_s: f64,
 }
 
+impl OllamaResponse {
+    fn error(msg: String) -> Self {
+        Self {
+            ok: false,
+            raw: msg,
+            total_duration_s: 0.0,
+        }
+    }
+}
+
 fn ollama_generate(
     model: &str,
     prompt: &str,
@@ -126,11 +136,7 @@ fn ollama_generate(
                 payload["images"] = serde_json::json!([b64]);
             }
             Err(e) => {
-                return OllamaResponse {
-                    ok: false,
-                    raw: format!("image_read_error: {e}"),
-                    total_duration_s: 0.0,
-                };
+                return OllamaResponse::error(format!("image_read_error: {e}"));
             }
         }
     }
@@ -149,11 +155,7 @@ fn ollama_generate(
             let body: String = match resp.into_string() {
                 Ok(s) => s,
                 Err(e) => {
-                    return OllamaResponse {
-                        ok: false,
-                        raw: format!("read_error: {e}"),
-                        total_duration_s: 0.0,
-                    };
+                    return OllamaResponse::error(format!("read_error: {e}"));
                 }
             };
             let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
@@ -173,11 +175,7 @@ fn ollama_generate(
                 total_duration_s: dur,
             }
         }
-        Err(e) => OllamaResponse {
-            ok: false,
-            raw: format!("http_error: {e}"),
-            total_duration_s: 0.0,
-        },
+        Err(e) => OllamaResponse::error(format!("http_error: {e}")),
     }
 }
 
@@ -601,12 +599,7 @@ fn classify_anime_details(model: &str, image_path: &Path, tmp_dir: &Path) -> Opt
 fn run_surya_ocr(image_path: &Path, surya_venv: &Path, surya_script: &Path) -> OcrResult {
     let python_bin = crate::platform::python::python_venv_binary(surya_venv);
     if !python_bin.exists() || !surya_script.exists() {
-        return OcrResult {
-            ok: false,
-            engine: "surya".to_string(),
-            text: String::new(),
-            line_count: 0,
-        };
+        return OcrResult::failed("surya");
     }
 
     let result = Command::new(&python_bin)
@@ -632,19 +625,9 @@ fn run_surya_ocr(image_path: &Path, surya_venv: &Path, surya_script: &Path) -> O
                     line_count,
                 };
             }
-            OcrResult {
-                ok: false,
-                engine: "surya".to_string(),
-                text: String::new(),
-                line_count: 0,
-            }
+            OcrResult::failed("surya")
         }
-        _ => OcrResult {
-            ok: false,
-            engine: "surya".to_string(),
-            text: String::new(),
-            line_count: 0,
-        },
+        _ => OcrResult::failed("surya"),
     }
 }
 
@@ -652,12 +635,7 @@ fn run_llm_ocr(model: &str, image_path: &Path, tmp_dir: &Path) -> OcrResult {
     let effective_path = first_frame_if_gif(image_path, tmp_dir);
     let resp = ollama_generate(model, OCR_PROMPT, Some(&effective_path), 2000, 240, false);
     if !resp.ok {
-        return OcrResult {
-            ok: false,
-            engine: "vision_llm".to_string(),
-            text: String::new(),
-            line_count: 0,
-        };
+        return OcrResult::failed("vision_llm");
     }
     let text = resp.raw.trim().to_string();
     let line_count = text.lines().count() as u64;
@@ -676,6 +654,17 @@ struct OcrResult {
     text: String,
     #[allow(dead_code)]
     line_count: u64,
+}
+
+impl OcrResult {
+    fn failed(engine: &str) -> Self {
+        Self {
+            ok: false,
+            engine: engine.to_string(),
+            text: String::new(),
+            line_count: 0,
+        }
+    }
 }
 
 fn run_ocr(

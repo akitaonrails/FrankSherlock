@@ -1,10 +1,6 @@
 /* ── Summary modal ────────────────────────────────────────── */
 .summary-modal {
   width: min(520px, 90%);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  padding: 16px;
 }
 
 .summary-modal h2 {
@@ -40,25 +36,4 @@
   border-bottom: none;
   border-top: 1px solid var(--border-primary);
   padding-top: 8px;
-}
-
-.summary-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.summary-actions button {
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  padding: 6px 14px;
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-
-.summary-actions button:hover {
-  border-color: var(--border-focus);
 }

@@ -1,5 +1,6 @@
 import type { RootInfo } from "../../types";
 import ModalOverlay from "./ModalOverlay";
+import "./shared-modal.css";
 import "./ConfirmDeleteModal.css";
 
 type Props = {
@@ -11,7 +12,7 @@ type Props = {
 export default function ConfirmDeleteModal({ root, onCancel, onConfirm }: Props) {
   return (
     <ModalOverlay onBackdropClick={onCancel}>
-      <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-base confirm-modal" onClick={(e) => e.stopPropagation()}>
         <h3>Remove folder?</h3>
         <p>
           This will remove <strong>{root.rootName}</strong> and
@@ -19,7 +20,7 @@ export default function ConfirmDeleteModal({ root, onCancel, onConfirm }: Props)
         </p>
         <p className="confirm-path">{root.rootPath}</p>
         <p className="confirm-note">Original files on disk will not be touched.</p>
-        <div className="confirm-actions">
+        <div className="modal-actions">
           <button type="button" onClick={onCancel}>Cancel</button>
           <button type="button" className="danger-btn" onClick={() => onConfirm(root)}>
             Remove

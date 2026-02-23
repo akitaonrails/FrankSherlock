@@ -1,28 +1,28 @@
-Given the docs/RESULTS you compiled I need a new prototype:
+Based on the results in `docs/RESULTS.md`, I need a new prototype:
 
-- new sub-directory "classification" for a short python prototype using the best model for image classification you found
-- I want you to pass through all images in test_files and create a test_results directory with the same structure and filenames as the source, so old_image/a.jpg would become old_image/a.[yml,md,txt] (whatever format you think is the best for me to check and then for later if we want to index into a vector database for relevancy search)
-- I believe the model, when loaded, should take up most of the GPU, so it will not be possible to paralelize the job, right? just confirming.
-- Make sure you make the best strategy, based on the results, to have the best classification possible
-- My goal is that if an image has a "girl character" I'd rather have the full "Ranma from Ranma 1/2 series" description. Of it it's receipt from my Bank I want to have the relevant information (dates, money value, etc with accuracy) and later be able to index and search for the content (not relying only on filename and easy file metadata such a mtime)
+- New `classification` subdirectory with a short Python prototype using whichever image classification model won the benchmarks.
+- Run it on all images in `test_files` and write results into a `test_results` directory mirroring the source structure. So `old_image/a.jpg` becomes `old_image/a.[yml,md,txt]` — whatever format is easiest to review and later index.
+- The model probably takes up most of the GPU when loaded, so I'm guessing we can't parallelize. Just confirming.
+- Go with the best strategy from the benchmarks. Squeeze out the best classification we can.
+- If an image has a "girl character," I want the full thing: "Ranma from the Ranma 1/2 series." If it's a bank receipt, I want dates, amounts, transaction IDs — accurate enough to search later, not just filenames and mtime.
 
-## THE MAIN APP
+## The main app
 
-- use everything we researched and discovered so far.
-- I want a desktop app similar to a file explorer, with thumbnail grid view.
-- I will be able to use natural language to query this database (use an LLM)
-- When I load the first time, I will do something in the console like `sherlock /mnt/terachad/Dropbox`
-- You will have a user centralized database, for example `~/.local/share/frank_sherlock/db`
-- This local directory will have 2 things: the classification files following the same path structure of the scanned files from target
-- Target (ex. Dropbox) must be considered sensitive information: you will NEVER attemp to overwrite or delete or modify any original files whatsoever, just read them
-- Because it's a NAS, I can have very deep directory and file structure, even a recursive find might be slow, so you need to be smart in always caching those out, and next time only try to find files added or modified from the timestamp of the previous scan
-- You need to be smart to realize if a directory was just renamed or moved and not re-scan the same files (maybe use a fast file fingerprinting)
-- After IA classification, the resulting text file must be used to feed a vector database (not sure which is better, classic elasticsearch? zvec?) - the purpose is to be able to query files by name, date range, and of course, the content (including weights such as the confidence, to be able to sort best candidates)
-- the initial version of the desktop application can be very simple, a place to query, a grid to dynamically show results
-- generating thumbnails can also be costly, so make smart caches in the .local/share directory as well
-- I can use this app in any NAS directory I want, you will smart cache the scanning, and not scan if data is already cached and nothing changes since last scan
-- I need a quick way to preview the document (such as pressing space on top of a resulting file)
-- for the first version, we don't have to care about manipulating the files found in the query (such as moving or renaming), I will ask to add those after the first version is working
-- not sure if we should just go with an Electron app or something like Rust Tauri
-- you can assume Ollama installed with service running
-- try to make this as isolated and self-contained as possible (maybe distributable as an .AppImage on Linux)
+- Build on everything from the research.
+- Desktop app, file-explorer-style, with a thumbnail grid.
+- Natural language search over the index (using an LLM).
+- First launch will look something like `sherlock /mnt/terachad/Dropbox` from the console.
+- Centralized user database at `~/.local/share/frank_sherlock/db`.
+- That local directory stores classification files (mirroring the scanned file paths) and the search index.
+- The target directory (e.g., Dropbox) is read-only. Never overwrite, delete, or modify anything in it.
+- NAS directories can be very deep. A naive recursive find might be slow, so cache scan results and only look for files added or modified since the last scan.
+- Detect renamed/moved directories and don't re-scan the same files. A fast file fingerprint should work.
+- Classification output feeds a search index. I want to query by name, date range, and content, with confidence scores for ranking.
+- Version one can be simple: search bar, thumbnail grid, results.
+- Thumbnail generation is expensive, so cache them under `.local/share`.
+- Works with any NAS directory. Cached scans, skip re-scanning when nothing changed.
+- Quick preview on a result (spacebar or similar).
+- No file manipulation (move, rename) in v1. That's later.
+- Unsure about Electron vs. Rust Tauri.
+- Assume Ollama is installed and running.
+- Keep it as self-contained as possible. Ideally an AppImage on Linux.

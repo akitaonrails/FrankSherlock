@@ -1,21 +1,6 @@
 /* ── Setup modal ──────────────────────────────────────────── */
 .setup-modal {
   width: min(680px, 100%);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  padding: 16px;
-}
-
-.setup-modal h2 {
-  margin: 0 0 8px;
-  font-size: 1rem;
-}
-
-.setup-modal p {
-  margin: 0 0 10px;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
 }
 
 .setup-status-grid {
@@ -70,29 +55,4 @@
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   min-height: 16px;
-}
-
-.setup-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.setup-actions button {
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  padding: 6px 14px;
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-
-.setup-actions button:hover {
-  border-color: var(--border-focus);
-}
-
-.setup-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }

@@ -1,4 +1,5 @@
 import type { ScanJobStatus } from "../../types";
+import { basename } from "../../utils";
 
 type ScanProgressProps = {
   scan: ScanJobStatus;
@@ -11,7 +12,7 @@ export default function ScanProgress({ scan, readOnly, onCancel, onResume }: Sca
   if (scan.status === "interrupted") {
     return (
       <div className="sidebar-scan-progress">
-        <div>Interrupted: {scan.rootPath.split("/").pop()} at {scan.processedFiles} / {scan.totalFiles}</div>
+        <div>Interrupted: {basename(scan.rootPath)} at {scan.processedFiles} / {scan.totalFiles}</div>
         {!readOnly && onResume && <button type="button" onClick={onResume}>Resume</button>}
       </div>
     );
@@ -24,7 +25,7 @@ export default function ScanProgress({ scan, readOnly, onCancel, onResume }: Sca
   return (
     <div className="sidebar-scan-progress">
       <div className="sidebar-scan-progress-header">
-        {scan.rootPath.split("/").pop()}: {scan.processedFiles} / {scan.totalFiles} ({pct.toFixed(1)}%)
+        {basename(scan.rootPath)}: {scan.processedFiles} / {scan.totalFiles} ({pct.toFixed(1)}%)
       </div>
       <progress value={pct} max={100} />
       <div className="sidebar-scan-meta">

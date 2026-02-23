@@ -2,20 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ImageTile from "../../components/Content/ImageTile";
-import type { SearchItem } from "../../types";
-
-const mockItem: SearchItem = {
-  id: 1,
-  rootId: 1,
-  relPath: "photos/beach.jpg",
-  absPath: "/home/user/photos/beach.jpg",
-  mediaType: "photo",
-  description: "A sunny beach",
-  confidence: 0.95,
-  mtimeNs: 0,
-  sizeBytes: 1024,
-  thumbnailPath: "/cache/thumb.jpg",
-};
+import { mockSearchItem as mockItem } from "../fixtures";
 
 describe("ImageTile", () => {
   it("renders the file name", () => {

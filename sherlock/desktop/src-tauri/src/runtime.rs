@@ -9,7 +9,7 @@ pub fn gather_runtime_status() -> RuntimeStatus {
     if let Ok(output) = Command::new("ollama").arg("ps").output() {
         if output.status.success() {
             ollama_available = true;
-            loaded_models = parse_ollama_ps_output(&String::from_utf8_lossy(&output.stdout));
+            loaded_models = parse_ollama_table_output(&String::from_utf8_lossy(&output.stdout));
         }
     }
 
@@ -29,37 +29,21 @@ pub fn list_installed_ollama_models() -> Option<Vec<String>> {
     if !output.status.success() {
         return None;
     }
-    Some(parse_ollama_list_output(&String::from_utf8_lossy(
+    Some(parse_ollama_table_output(&String::from_utf8_lossy(
         &output.stdout,
     )))
 }
 
-fn parse_ollama_ps_output(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in text.lines().skip(1) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(model) = trimmed.split_whitespace().next() {
-            out.push(model.to_string());
-        }
-    }
-    out
-}
-
-fn parse_ollama_list_output(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in text.lines().skip(1) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(name) = trimmed.split_whitespace().next() {
-            out.push(name.to_string());
-        }
-    }
-    out
+/// Parse the first whitespace-delimited column from each non-header line.
+/// Works for both `ollama ps` and `ollama list` output.
+fn parse_ollama_table_output(text: &str) -> Vec<String> {
+    text.lines()
+        .skip(1) // skip header row
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| l.split_whitespace().next())
+        .map(|s| s.to_string())
+        .collect()
 }
 
 #[cfg(test)]
@@ -69,14 +53,14 @@ mod tests {
     #[test]
     fn parses_ollama_ps_rows() {
         let sample = "NAME ID SIZE PROCESSOR UNTIL\nqwen2.5vl:7b abc 6.0 GB 100% GPU 4 minutes\n";
-        let models = parse_ollama_ps_output(sample);
+        let models = parse_ollama_table_output(sample);
         assert_eq!(models, vec!["qwen2.5vl:7b".to_string()]);
     }
 
     #[test]
     fn parses_ollama_list_rows() {
         let sample = "NAME ID SIZE MODIFIED\nqwen2.5vl:7b abc 5 GB 1 day ago\n";
-        let models = parse_ollama_list_output(sample);
+        let models = parse_ollama_table_output(sample);
         assert_eq!(models, vec!["qwen2.5vl:7b".to_string()]);
     }
 }

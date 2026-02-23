@@ -1,5 +1,7 @@
 import type { ScanJobStatus } from "../../types";
+import { basename } from "../../utils";
 import ModalOverlay from "./ModalOverlay";
+import "./shared-modal.css";
 import "./ResumeModal.css";
 
 type Props = {
@@ -11,18 +13,18 @@ type Props = {
 export default function ResumeModal({ interruptedScans, onDismiss, onResumeAll }: Props) {
   return (
     <ModalOverlay>
-      <div className="resume-modal">
+      <div className="modal-base resume-modal">
         <h2>Interrupted Scans</h2>
         <p>The following scans were interrupted and can be resumed:</p>
         <ul className="resume-scan-list">
           {interruptedScans.map((scan) => (
             <li key={scan.id}>
-              <strong>{scan.rootPath.split("/").pop()}</strong>
+              <strong>{basename(scan.rootPath)}</strong>
               <span> — {scan.processedFiles}/{scan.totalFiles} files processed</span>
             </li>
           ))}
         </ul>
-        <div className="resume-actions">
+        <div className="modal-actions">
           <button type="button" onClick={onDismiss}>Later</button>
           <button type="button" onClick={onResumeAll}>Resume Now</button>
         </div>

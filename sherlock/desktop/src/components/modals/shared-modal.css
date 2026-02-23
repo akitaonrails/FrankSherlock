@@ -1,0 +1,47 @@
+/* ── Shared modal styles ──────────────────────────────────── */
+
+/* Base modal container */
+.modal-base {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.modal-base h2,
+.modal-base h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.modal-base p {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* Action button row */
+.modal-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-actions button {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.modal-actions button:hover {
+  border-color: var(--border-focus);
+}
+
+.modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

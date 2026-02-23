@@ -1,13 +1,13 @@
 ## Frank Sherlock
 
-The goal of this project is to research the possibilities of using modern LLMs and other open source models trained to classify not only text but also media. For example, there are many tools that can open a .jpg file from an anime and classify it as "young woman in a beach background" or similar. But I do not know if it's possible to narrow down to "it's the character Ranma, from Rumiko Takahashi's Ranma 1/2 TV series, in a bikini in the beach background from the OVA The Battle for Miss Beachsite".
+I want to figure out if modern LLMs and open-source vision models can classify media, not just text. There are tools that can open a .jpg of an anime character and say "young woman on a beach." But can they narrow it down to "the character Ranma, from Rumiko Takahashi's Ranma 1/2, wearing a bikini on the beach from the OVA The Battle for Miss Beachside"? I genuinely don't know.
 
-Then we have audio. I'd like to research how we advanced in Shazam like audio recognition. I know there are algorithms to find a "fingerprint" of a song and consult a database (is there open databases?) to know what song is playing from just a few seconds.
+Then there's audio. How far have we come with Shazam-like recognition? I know there are fingerprinting algorithms that match songs against a database (are there open databases?) from just a few seconds. Worth looking into.
 
-For video we have short clips and full movies. Need to research if there are ways to figure out what movie we are dealing with without having to read an entire multi-gigabyte stream. Maybe from the audio strem with a Shazam-like scheme? From a few clips?
+For video, we have short clips and full movies. Is there a way to identify a movie without reading the entire multi-gigabyte stream? Maybe from the audio track with a Shazam-like approach, or from a few sampled frames?
 
-I prepared this directory test_files with many examples of media files. I'd like you to do a deep research on the options available to catalog media files like that. If there are many options we might have to A/B test them.
+I've put together a `test_files` directory with a bunch of different media files. I want to survey what's out there for cataloging this kind of stuff. If there are multiple viable options, we'll A/B test them.
 
-I have an AMD 7850X3D CPU with an RTX 5090 GPU running Arch Linux that we can use. I do not want to use remote OpenRouter or OpenAI APIs. I want the research to focus on open source, self-hosted options to run locally. Because if this experiment goes well, then the next project is to use it to catalog terabytes of files from my home NAS.
+Hardware: AMD 7850X3D CPU, RTX 5090 GPU, Arch Linux. No remote APIs — no OpenRouter, no OpenAI. Everything has to be open-source and run locally. If this works, the next project is cataloging terabytes of files on my home NAS.
 
-But before we tackle that, we need to succeed in the research experiment first. You can suggest small scripts and prototypes for us to build and test different models and approaches. Use open source tools such as imagemagick, ffmpeg to manipulate the media files. The goal is to be able to efficiently catalog those files the best we can.
+First things first though: the research has to pan out before we build anything real. Small scripts, quick prototypes, different models. ImageMagick and FFmpeg for file manipulation. See what sticks.

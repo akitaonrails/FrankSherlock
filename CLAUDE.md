@@ -30,7 +30,7 @@ docs/                   <- App assets (app_icon.png)
 - **Frontend**: React + Vite + TypeScript
 - **AI**: Ollama (qwen2.5vl:7b) for vision classification, Surya OCR in isolated Python venv
 - **Database**: SQLite + FTS5 in `~/.local/share/frank_sherlock/db/`
-- **Target OS**: Linux (AppImage packaging)
+- **Target OS**: Linux (AppImage), macOS (DMG), Windows (MSI)
 
 ## Build & Test
 
@@ -39,9 +39,10 @@ From `sherlock/desktop/`:
 ```bash
 npm install                    # frontend deps
 cargo build                    # rust backend (from src-tauri/)
-cargo test                     # 49 unit tests
+cargo test                     # 69 unit tests
 npm run tauri:dev              # launch dev mode
-npm run tauri:build            # produce AppImage
+npm run test                   # 84 frontend tests
+npm run tauri:build            # produce AppImage/DMG/MSI
 ```
 
 If Wayland/NVIDIA causes WebKit issues:
@@ -79,6 +80,7 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 npm run tauri:dev
 - Frontend: TypeScript strict mode, camelCase for TS types matching Rust's `#[serde(rename_all = "camelCase")]`.
 - JSON parsing from LLMs uses a 3-tier fallback: direct parse -> brace-balanced extraction -> regex field salvage.
 - Thumbnails and classification caches mirror the source `rel_path` structure under their respective dirs.
+- Frontend shared utilities (`basename`, `errorMessage`) live in `src/utils.ts`. Modal CSS shares base styles via `shared-modal.css`.
 
 ## Important Paths
 
@@ -90,12 +92,15 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 npm run tauri:dev
 
 ## Testing
 
-Run from `sherlock/desktop/src-tauri/`:
 ```bash
-cargo test
+# Rust (from sherlock/desktop/src-tauri/)
+cargo test                     # 69 tests
+
+# Frontend (from sherlock/desktop/)
+npm run test                   # 84 tests
 ```
 
-Tests cover: JSON parsing fallbacks, thumbnail generation, incremental scan discovery, DB operations (upsert, touch, delete, FTS), query parsing, and scan job persistence.
+Tests cover: JSON parsing fallbacks, thumbnail generation, incremental scan discovery, DB operations (upsert, touch, delete, FTS), query parsing, scan job persistence, platform abstraction, and all UI components. Shared test fixtures live in `src/__tests__/fixtures.ts`.
 
 ## What NOT to Change
 

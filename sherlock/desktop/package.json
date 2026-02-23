@@ -2,6 +2,7 @@
   "name": "sherlock-desktop",
   "private": true,
   "version": "0.1.0",
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite --host --port 1420",

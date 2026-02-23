@@ -1,21 +1,9 @@
 /* ── Confirm delete modal ────────────────────────────────── */
 .confirm-modal {
   width: min(420px, 90%);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  padding: 16px;
-}
-
-.confirm-modal h3 {
-  margin: 0 0 8px;
-  font-size: 1rem;
 }
 
 .confirm-modal p {
-  margin: 0 0 8px;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
   line-height: 1.4;
 }
 
@@ -33,28 +21,6 @@
 .confirm-note {
   font-style: italic;
   color: var(--text-secondary);
-}
-
-.confirm-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-
-.confirm-actions button {
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  padding: 6px 14px;
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
-
-.confirm-actions button:hover {
-  border-color: var(--border-focus);
 }
 
 .danger-btn {

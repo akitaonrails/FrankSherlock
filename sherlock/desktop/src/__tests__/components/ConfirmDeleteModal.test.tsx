@@ -2,16 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ConfirmDeleteModal from "../../components/modals/ConfirmDeleteModal";
-import type { RootInfo } from "../../types";
-
-const root: RootInfo = {
-  id: 1,
-  rootPath: "/home/user/photos",
-  rootName: "photos",
-  createdAt: 0,
-  lastScanAt: null,
-  fileCount: 42,
-};
+import { mockRoot as root } from "../fixtures";
 
 describe("ConfirmDeleteModal", () => {
   it("renders folder name and file count", () => {

@@ -2,16 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RootCard from "../../components/Sidebar/RootCard";
-import type { RootInfo } from "../../types";
-
-const sampleRoot: RootInfo = {
-  id: 1,
-  rootPath: "/home/user/photos",
-  rootName: "photos",
-  createdAt: 0,
-  lastScanAt: null,
-  fileCount: 42,
-};
+import { mockRoot as sampleRoot, mockRunningScan } from "../fixtures";
 
 describe("RootCard", () => {
   it("renders root name and file count", () => {
@@ -55,14 +46,8 @@ describe("RootCard", () => {
   });
 
   it("shows scan progress when scan is active", () => {
-    const scan = {
-      id: 10, rootId: 1, rootPath: "/home/user/photos", status: "running" as const,
-      scanMarker: 0, totalFiles: 100, processedFiles: 50, progressPct: 50,
-      added: 10, modified: 5, moved: 2, unchanged: 33, deleted: 0,
-      startedAt: 0, updatedAt: 0,
-    };
     render(
-      <RootCard root={sampleRoot} isSelected={false} scan={scan} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} />
+      <RootCard root={sampleRoot} isSelected={false} scan={mockRunningScan} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} />
     );
     expect(screen.getByText("50/100")).toBeInTheDocument();
   });

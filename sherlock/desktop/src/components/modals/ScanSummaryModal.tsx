@@ -1,6 +1,8 @@
 import type { ScanJobStatus } from "../../types";
+import { basename } from "../../utils";
 import { formatElapsed } from "../../utils/format";
 import ModalOverlay from "./ModalOverlay";
+import "./shared-modal.css";
 import "./ScanSummaryModal.css";
 
 type Props = {
@@ -11,7 +13,7 @@ type Props = {
 export default function ScanSummaryModal({ completedJobs, onClose }: Props) {
   return (
     <ModalOverlay>
-      <div className="summary-modal">
+      <div className="modal-base summary-modal">
         <h2>Scan Complete</h2>
         <table className="summary-table">
           <thead>
@@ -24,7 +26,7 @@ export default function ScanSummaryModal({ completedJobs, onClose }: Props) {
           <tbody>
             {completedJobs.map((job) => (
               <tr key={job.id}>
-                <td title={job.rootPath}>{job.rootPath.split("/").pop()}</td>
+                <td title={job.rootPath}>{basename(job.rootPath)}</td>
                 <td>{job.processedFiles}</td>
                 <td>{formatElapsed(job.startedAt, job.completedAt)}</td>
               </tr>
@@ -45,7 +47,7 @@ export default function ScanSummaryModal({ completedJobs, onClose }: Props) {
             </tr>
           </tfoot>
         </table>
-        <div className="summary-actions">
+        <div className="modal-actions">
           <button type="button" onClick={onClose}>Close</button>
         </div>
       </div>

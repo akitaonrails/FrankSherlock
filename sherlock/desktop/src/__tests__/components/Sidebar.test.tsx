@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Sidebar from "../../components/Sidebar/Sidebar";
 import type { RootInfo, ScanJobStatus } from "../../types";
+import { mockRoot as sampleRoot, mockRunningScan } from "../fixtures";
 
 const defaultProps = {
   roots: [] as RootInfo[],
@@ -19,15 +20,6 @@ const defaultProps = {
   onCancelScan: vi.fn(),
   onResumeScan: vi.fn(),
   onCleanupOllama: vi.fn(),
-};
-
-const sampleRoot: RootInfo = {
-  id: 1,
-  rootPath: "/home/user/photos",
-  rootName: "photos",
-  createdAt: 0,
-  lastScanAt: null,
-  fileCount: 42,
 };
 
 describe("Sidebar", () => {
@@ -75,25 +67,14 @@ describe("Sidebar", () => {
   });
 
   it("renders running scan progress", () => {
-    const scan: ScanJobStatus = {
-      id: 10, rootId: 1, rootPath: "/home/user/photos", status: "running",
-      scanMarker: 0, totalFiles: 100, processedFiles: 50, progressPct: 50,
-      added: 10, modified: 5, moved: 2, unchanged: 33, deleted: 0,
-      startedAt: 0, updatedAt: 0,
-    };
-    render(<Sidebar {...defaultProps} activeScans={[scan]} />);
+    render(<Sidebar {...defaultProps} activeScans={[mockRunningScan]} />);
     expect(screen.getByText(/photos:.*50.*\/.*100/)).toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
   it("renders interrupted scan with resume button", () => {
-    const scan: ScanJobStatus = {
-      id: 11, rootId: 1, rootPath: "/home/user/photos", status: "interrupted",
-      scanMarker: 0, totalFiles: 100, processedFiles: 50, progressPct: 50,
-      added: 10, modified: 5, moved: 2, unchanged: 33, deleted: 0,
-      startedAt: 0, updatedAt: 0,
-    };
-    render(<Sidebar {...defaultProps} activeScans={[scan]} />);
+    const interruptedScan = { ...mockRunningScan, id: 11, status: "interrupted" as const };
+    render(<Sidebar {...defaultProps} activeScans={[interruptedScan]} />);
     expect(screen.getByText("Resume")).toBeInTheDocument();
   });
 });

@@ -2,17 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PreviewModal from "../../components/modals/PreviewModal";
-import type { SearchItem } from "../../types";
+import { mockSearchItem } from "../fixtures";
 
-const item: SearchItem = {
-  id: 1,
-  rootId: 1,
+const item = {
+  ...mockSearchItem,
   relPath: "photos/sunset.jpg",
   absPath: "/home/user/photos/sunset.jpg",
-  mediaType: "photo",
   description: "A beautiful sunset",
   confidence: 0.92,
-  mtimeNs: 0,
   sizeBytes: 2048,
 };
 

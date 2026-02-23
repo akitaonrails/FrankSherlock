@@ -8,6 +8,7 @@ import type {
   SearchItem,
   SetupStatus
 } from "./types";
+import { errorMessage } from "./utils";
 import Titlebar from "./components/Titlebar/Titlebar";
 import Sidebar from "./components/Sidebar/Sidebar";
 import Content from "./components/Content/Content";
@@ -146,7 +147,7 @@ export default function App() {
       setDbStats(stats);
       await runSearch(0, false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     }
   }
 

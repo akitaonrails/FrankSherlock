@@ -20,6 +20,7 @@ import type {
   ScanJobStatus,
   SetupStatus,
 } from "../types";
+import { basename, errorMessage } from "../utils";
 
 const PAGE_SIZE = 80;
 const MAX_ITEMS = 400;
@@ -83,7 +84,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
         } else if (job.status === "completed") {
           justCompleted.push(job);
         } else if (job.status === "failed") {
-          cb.setError(job.errorText || `Scan failed for ${job.rootPath.split("/").pop()}`);
+          cb.setError(job.errorText || `Scan failed for ${basename(job.rootPath)}`);
         }
       }
 
@@ -105,7 +106,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
 
       setTrackedJobIds(stillTracked);
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }, [trackedJobIds, cb, refreshRoots]);
 
@@ -134,7 +135,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
         cb.setShowResumeModal(true);
       }
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }
 
@@ -151,11 +152,11 @@ export function useScanManager(cb: ScanManagerCallbacks) {
       const job = await startScan(selected as string);
       setTrackedJobIds((prev) => [...prev, job.id]);
       lastProcessedRef.current = 0;
-      cb.setNotice(`Scan started for ${job.rootPath.split("/").pop()}`);
+      cb.setNotice(`Scan started for ${basename(job.rootPath)}`);
       await refreshRoots();
       await pollRuntimeAndScans();
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }
 
@@ -163,9 +164,9 @@ export function useScanManager(cb: ScanManagerCallbacks) {
     if (readOnly) return;
     try {
       await cancelScan(scan.id);
-      cb.setNotice(`Cancelling scan for ${scan.rootPath.split("/").pop()}...`);
+      cb.setNotice(`Cancelling scan for ${basename(scan.rootPath)}...`);
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }
 
@@ -176,10 +177,10 @@ export function useScanManager(cb: ScanManagerCallbacks) {
       setTrackedJobIds((prev) => [...prev, job.id]);
       setCompletedJobs([]);
       lastProcessedRef.current = 0;
-      cb.setNotice(`Resuming scan for ${job.rootPath.split("/").pop()}`);
+      cb.setNotice(`Resuming scan for ${basename(job.rootPath)}`);
       await pollRuntimeAndScans();
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }
 
@@ -192,7 +193,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
         newIds.push(job.id);
         lastProcessedRef.current = 0;
       } catch (err) {
-        cb.setError(err instanceof Error ? err.message : String(err));
+        cb.setError(errorMessage(err));
       }
     }
     if (newIds.length > 0) {
@@ -208,7 +209,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
       cb.setNotice(`Unloaded ${result.stoppedModels}/${result.runningModels} model(s).`);
       await pollRuntimeAndScans();
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }
 
@@ -217,7 +218,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
       await startSetupDownload();
       await pollRuntimeAndScans();
     } catch (err) {
-      cb.setError(err instanceof Error ? err.message : String(err));
+      cb.setError(errorMessage(err));
     }
   }
 
