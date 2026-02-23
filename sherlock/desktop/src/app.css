@@ -31,3 +31,10 @@
     display: none;
   }
 }
+
+.main-area.sidebar-collapsed {
+  grid-template-columns: 0px 1fr;
+}
+.main-area.sidebar-collapsed .sidebar {
+  display: none;
+}

@@ -11,6 +11,24 @@
   color: var(--text-secondary);
 }
 
+.titlebar-toggle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 40px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  -webkit-app-region: no-drag;
+}
+.titlebar-toggle:hover {
+  background: var(--bg-hover);
+}
+
 .titlebar-controls {
   position: absolute;
   right: 0;

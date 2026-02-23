@@ -75,6 +75,7 @@ export default function App() {
   const [showModelInfo, setShowModelInfo] = useState(false);
   const [editMetadataItem, setEditMetadataItem] = useState<SearchItem | null>(null);
   const [forceShowSetup, setForceShowSetup] = useState(false); // F10 debug toggle
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   /* ── Album & Smart Folder state ── */
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -290,6 +291,18 @@ export default function App() {
     const match = query.match(/^album:(?:"([^"]+)"|(\S+))$/i);
     return match ? (match[1] ?? match[2] ?? null) : null;
   }, [query]);
+
+  // Derive subtitle for titlebar based on current context
+  const subtitle = useMemo(() => {
+    if (activeAlbumName) return activeAlbumName;
+    const sf = smartFolders.find(f => f.id === activeSmartFolderId);
+    if (sf) return sf.name;
+    if (selectedRootId != null) {
+      const root = roots.find(r => r.id === selectedRootId);
+      if (root) return root.rootName;
+    }
+    return null;
+  }, [activeAlbumName, activeSmartFolderId, smartFolders, selectedRootId, roots]);
 
   /* ── Handlers ── */
   function onWindowClose() {
@@ -617,7 +630,12 @@ export default function App() {
       )}
 
       {/* ── Titlebar ── */}
-      <Titlebar onClose={onWindowClose} />
+      <Titlebar
+        onClose={onWindowClose}
+        subtitle={subtitle}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed(c => !c)}
+      />
 
       {/* ── Read-Only Banner ── */}
       {readOnly && (
@@ -627,7 +645,7 @@ export default function App() {
       )}
 
       {/* ── Main Area ── */}
-      <div className="main-area">
+      <div className={`main-area${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
         <Sidebar
           roots={roots}
           selectedRootId={selectedRootId}
