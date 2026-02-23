@@ -20,8 +20,6 @@ jobs:
             rust_target: x86_64-unknown-linux-gnu
           - platform: macos-latest
             rust_target: aarch64-apple-darwin
-          - platform: macos-13
-            rust_target: x86_64-apple-darwin
           - platform: windows-latest
             rust_target: x86_64-pc-windows-msvc
 
@@ -90,7 +88,6 @@ jobs:
             |----------|------|
             | Linux (AppImage) | `frank-sherlock_*_amd64.AppImage` |
             | macOS (Apple Silicon) | `frank-sherlock_*_aarch64.dmg` |
-            | macOS (Intel) | `frank-sherlock_*_x64.dmg` |
             | Windows | `frank-sherlock_*_x64-setup.exe` |
 
             ### Prerequisites
