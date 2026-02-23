@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/app_icon.png" alt="Frank Sherlock" width="128" />
+</p>
+
 # Frank Sherlock
 
 Local-only, AI-powered image cataloging and search for your NAS. Point it at a directory, and it classifies every image using a local vision LLM, extracts text via OCR, generates thumbnails, and indexes everything into a searchable SQLite database. Nothing leaves your machine.
@@ -13,6 +17,8 @@ Local-only, AI-powered image cataloging and search for your NAS. Point it at a d
 - Resumes interrupted scans from the last checkpoint
 
 ## Screenshot
+
+![Frank Sherlock screenshot](docs/frank_sherlock.png)
 
 The UI is loosely inspired by VSCode: custom titlebar, collapsible sidebar, thumbnail grid, media type filters, confidence slider, preview overlay, and automatic light/dark theme.
 
@@ -164,7 +170,7 @@ GitHub Actions runs on every push and PR against main:
 - Platforms: Ubuntu 22.04, macOS (latest), Windows (latest)
 - Checks: `cargo test`, `cargo clippy`, `cargo fmt --check`, `npm run build`, `npm run test`, `cargo audit` (Linux only)
 
-Releases are built on `v*` tags for Linux (AppImage), macOS (ARM + Intel DMG), and Windows (MSI).
+Releases are built on `v*` tags for Linux (AppImage), macOS (Apple Silicon DMG), and Windows (MSI).
 
 ## License
 
