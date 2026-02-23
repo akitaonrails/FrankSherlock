@@ -46,7 +46,7 @@ export function useGridNavigation(p: GridNavParams) {
         return;
       }
 
-      if (e.key === "F11") {
+      if (e.key === "F10") {
         e.preventDefault();
         p.setForceShowSetup(!p.forceShowSetup);
         return;

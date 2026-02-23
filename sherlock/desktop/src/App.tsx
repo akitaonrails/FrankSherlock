@@ -72,7 +72,7 @@ export default function App() {
   const [renameItem, setRenameItem] = useState<SearchItem | null>(null);
   const [showModelInfo, setShowModelInfo] = useState(false);
   const [editMetadataItem, setEditMetadataItem] = useState<SearchItem | null>(null);
-  const [forceShowSetup, setForceShowSetup] = useState(false); // F11 debug toggle
+  const [forceShowSetup, setForceShowSetup] = useState(false); // F10 debug toggle
 
   /* ── Album & Smart Folder state ── */
   const [albums, setAlbums] = useState<Album[]>([]);

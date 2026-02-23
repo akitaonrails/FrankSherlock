@@ -28,7 +28,13 @@ export default function RootCard({ root, isSelected, scan, readOnly, onSelect, o
       }}
     >
       <div className="root-card-header">
-        <span className="root-card-icon">&#128193;</span>
+        <span className="root-card-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1.5 3C1.5 2.17 2.17 1.5 3 1.5h3.59a1.5 1.5 0 011.06.44L8.71 3H13a1.5 1.5 0 011.5 1.5v8A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V3z" fill="#5AC8FA"/>
+            <path d="M1.5 5.5h13v7a1.5 1.5 0 01-1.5 1.5H3a1.5 1.5 0 01-1.5-1.5v-7z" fill="#34AADC"/>
+            <path d="M1.5 5.5h13v1H1.5z" fill="rgba(0,0,0,0.08)"/>
+          </svg>
+        </span>
         <span className="root-card-name" title={root.rootPath}>{root.rootName}</span>
         {!readOnly && (
           <button
