@@ -202,4 +202,97 @@ mod tests {
         assert!(parsed.album_name.is_none());
         assert_eq!(parsed.query_text, "beach sunset");
     }
+
+    #[test]
+    fn parses_free_text_only() {
+        let parsed = parse_query("ranma");
+        assert_eq!(parsed.query_text, "ranma");
+        assert!(parsed.media_types.is_empty());
+        assert!(parsed.date_from.is_none());
+        assert!(parsed.min_confidence.is_none());
+        assert!(parsed.root_hints.is_empty());
+    }
+
+    #[test]
+    fn parses_photo_media_type() {
+        let parsed = parse_query("photo beach");
+        assert!(parsed.media_types.contains(&"photo".to_string()));
+        assert_eq!(parsed.query_text, "photo beach");
+    }
+
+    #[test]
+    fn parses_screenshot_media_type() {
+        let parsed = parse_query("screenshot");
+        assert!(parsed.media_types.contains(&"screenshot".to_string()));
+    }
+
+    #[test]
+    fn parses_receipt_as_document() {
+        let parsed = parse_query("receipt santander");
+        assert!(parsed.media_types.contains(&"document".to_string()));
+    }
+
+    #[test]
+    fn parses_from_year() {
+        let parsed = parse_query("from 2022");
+        assert_eq!(parsed.date_from.as_deref(), Some("2022-01-01"));
+        assert!(parsed.date_to.is_none());
+    }
+
+    #[test]
+    fn parses_single_iso_date() {
+        let parsed = parse_query("2023-06-15");
+        assert_eq!(parsed.date_from.as_deref(), Some("2023-06-15"));
+        assert!(parsed.date_to.is_none());
+    }
+
+    #[test]
+    fn parses_iso_date_range() {
+        let parsed = parse_query("2023-01-01 2023-12-31");
+        assert_eq!(parsed.date_from.as_deref(), Some("2023-01-01"));
+        assert_eq!(parsed.date_to.as_deref(), Some("2023-12-31"));
+    }
+
+    #[test]
+    fn parses_min_confidence_syntax() {
+        let parsed = parse_query("min confidence > 0.7");
+        assert_eq!(parsed.min_confidence, Some(0.7));
+    }
+
+    #[test]
+    fn parses_root_hint_only() {
+        let parsed = parse_query("in Dropbox");
+        assert_eq!(parsed.root_hints, vec!["Dropbox".to_string()]);
+    }
+
+    #[test]
+    fn parses_media_type_with_root_hint() {
+        let parsed = parse_query("receipts in Downloads");
+        assert!(parsed.media_types.contains(&"document".to_string()));
+        assert_eq!(parsed.root_hints, vec!["Downloads".to_string()]);
+    }
+
+    #[test]
+    fn parses_combined_anime_date_range() {
+        let parsed = parse_query("anime between 2023 and 2024");
+        assert!(parsed.media_types.contains(&"anime".to_string()));
+        assert_eq!(parsed.date_from.as_deref(), Some("2023-01-01"));
+        assert_eq!(parsed.date_to.as_deref(), Some("2024-12-31"));
+    }
+
+    #[test]
+    fn parses_combined_receipts_root_confidence() {
+        let parsed = parse_query("receipts in Dropbox confidence >= 0.9");
+        assert!(parsed.media_types.contains(&"document".to_string()));
+        assert_eq!(parsed.root_hints, vec!["Dropbox".to_string()]);
+        assert_eq!(parsed.min_confidence, Some(0.9));
+    }
+
+    #[test]
+    fn parses_combined_photos_from_year_root() {
+        let parsed = parse_query("photos from 2022 in Camera");
+        assert!(parsed.media_types.contains(&"photo".to_string()));
+        assert_eq!(parsed.date_from.as_deref(), Some("2022-01-01"));
+        assert_eq!(parsed.root_hints, vec!["Camera".to_string()]);
+    }
 }
