@@ -769,10 +769,101 @@ pub fn classify_pdf(
         }
     };
 
-    let media_type = "document".to_string();
-    let mut description = format!("PDF document ({page_count} pages)");
+    // Step 2: Render first content page for vision classification
+    let content_pages =
+        crate::pdf::find_content_pages(pdf_path, 1, pdfium_lib).unwrap_or_else(|_| vec![0]);
+    let page_idx = content_pages.first().copied().unwrap_or(0);
+
+    let _ = std::fs::create_dir_all(tmp_dir);
+    let tmp_img_path = tmp_dir.join("_pdf_page.png");
+
+    let primary = match crate::pdf::render_page(pdf_path, page_idx, 200, pdfium_lib) {
+        Ok(img) => {
+            if let Err(e) = img.save(&tmp_img_path) {
+                log::warn!("Failed to save PDF page for classification: {e}");
+                None
+            } else {
+                let result = classify_primary(model, &tmp_img_path, tmp_dir);
+                Some(result)
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to render PDF page for classification: {e}");
+            None
+        }
+    };
+
+    // Use vision model results as the base, fall back to generic PDF description
+    let media_type = primary
+        .as_ref()
+        .and_then(|p| p.get("media_type").and_then(|v| v.as_str()))
+        .unwrap_or("document")
+        .to_string();
+    let vision_description = primary
+        .as_ref()
+        .and_then(|p| p.get("description").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    let vision_confidence = primary
+        .as_ref()
+        .and_then(|p| p.get("confidence").and_then(|v| v.as_f64()))
+        .unwrap_or(0.0) as f32;
+
+    let mut description = if vision_description.is_empty() {
+        format!("PDF document ({page_count} pages)")
+    } else {
+        format!("PDF ({page_count}p): {vision_description}")
+    };
+
+    // Collect canonical mentions from vision model (series/character candidates)
+    let mut canonical_mentions = String::new();
+    if let Some(ref p) = primary {
+        // Anime enrichment on the rendered page (same logic as classify_image)
+        if should_run_anime_enrichment(p) {
+            if tmp_img_path.exists() {
+                if let Some(anime) = classify_anime_details(model, &tmp_img_path, tmp_dir) {
+                    if let Some(series) = anime.get("series").and_then(clean_nullable_str) {
+                        description = format!("{description} [Series: {series}]");
+                    }
+                    let mentions =
+                        normalize_list(anime.get("canonical_mentions").unwrap_or(&Value::Null));
+                    if !mentions.is_empty() {
+                        canonical_mentions = mentions.join(", ");
+                    }
+                    if let Some(chars) = anime.get("characters").and_then(|v| v.as_array()) {
+                        let char_names: Vec<String> = chars
+                            .iter()
+                            .filter_map(|c| {
+                                c.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .collect();
+                        if !char_names.is_empty() && canonical_mentions.is_empty() {
+                            canonical_mentions = char_names.join(", ");
+                        }
+                    }
+                }
+            }
+        }
+
+        let series_cands = normalize_list(p.get("series_candidates").unwrap_or(&Value::Null));
+        let char_cands = normalize_list(p.get("character_candidates").unwrap_or(&Value::Null));
+        let mut all_mentions: Vec<String> = Vec::new();
+        if !canonical_mentions.is_empty() {
+            all_mentions.extend(canonical_mentions.split(", ").map(|s| s.to_string()));
+        }
+        for c in series_cands.iter().chain(char_cands.iter()) {
+            let lower = c.to_lowercase();
+            if !all_mentions.iter().any(|m| m.to_lowercase() == lower) {
+                all_mentions.push(c.clone());
+            }
+        }
+        canonical_mentions = all_mentions.join(", ");
+    }
+
+    // Step 3: Text enrichment (document fields, OCR)
     let mut extracted_text;
-    let canonical_mentions = String::new();
 
     if !crate::pdf::is_scanned_pdf(&full_text, page_count) {
         // Text-rich PDF: use extracted text for LLM document field extraction
@@ -790,46 +881,38 @@ pub fn classify_pdf(
             description = format!("{description} [Issuer: {issuer}]");
         }
     } else {
-        // Scanned PDF: render first content page and run OCR
+        // Scanned PDF: run OCR on the already-rendered page
         extracted_text = String::new();
-        let content_pages =
-            crate::pdf::find_content_pages(pdf_path, 1, pdfium_lib).unwrap_or_else(|_| vec![0]);
-        let page_idx = content_pages.first().copied().unwrap_or(0);
+        if tmp_img_path.exists() {
+            let ocr = run_ocr(model, &tmp_img_path, tmp_dir, surya_venv, surya_script);
+            if ocr.ok && !ocr.text.is_empty() {
+                extracted_text = ocr.text.clone();
 
-        // Render page to temp image for OCR
-        match crate::pdf::render_page(pdf_path, page_idx, 200, pdfium_lib) {
-            Ok(img) => {
-                let _ = std::fs::create_dir_all(tmp_dir);
-                let tmp_img_path = tmp_dir.join("_pdf_ocr_page.png");
-                if let Err(e) = img.save(&tmp_img_path) {
-                    log::warn!("Failed to save PDF page for OCR: {e}");
-                } else {
-                    let ocr = run_ocr(model, &tmp_img_path, tmp_dir, surya_venv, surya_script);
-                    if ocr.ok && !ocr.text.is_empty() {
-                        extracted_text = ocr.text.clone();
-
-                        let doc_fields = extract_document_fields(model, &ocr.text);
-                        if let Some(kind) =
-                            doc_fields.get("document_kind").and_then(clean_nullable_str)
-                        {
-                            description = format!("{description} [Doc: {kind}]");
-                        }
-                        if let Some(issuer) = doc_fields.get("issuer").and_then(clean_nullable_str)
-                        {
-                            description = format!("{description} [Issuer: {issuer}]");
-                        }
-                    }
-                    let _ = std::fs::remove_file(&tmp_img_path);
+                let doc_fields = extract_document_fields(model, &ocr.text);
+                if let Some(kind) =
+                    doc_fields.get("document_kind").and_then(clean_nullable_str)
+                {
+                    description = format!("{description} [Doc: {kind}]");
                 }
-            }
-            Err(e) => {
-                log::warn!("Failed to render PDF page for OCR: {e}");
+                if let Some(issuer) = doc_fields.get("issuer").and_then(clean_nullable_str)
+                {
+                    description = format!("{description} [Issuer: {issuer}]");
+                }
             }
         }
     }
 
+    // Clean up temp image
+    let _ = std::fs::remove_file(&tmp_img_path);
+
     let lang_hint = detect_lang_hint(&extracted_text);
-    let confidence = if extracted_text.is_empty() { 0.3 } else { 0.7 } as f32;
+    let confidence = if vision_confidence > 0.0 {
+        vision_confidence
+    } else if !extracted_text.is_empty() {
+        0.7
+    } else {
+        0.3
+    };
 
     ClassificationResult {
         media_type,
