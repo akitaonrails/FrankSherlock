@@ -1,4 +1,6 @@
+#[cfg(target_os = "linux")]
 use std::io::Write;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 
 /// Copy text to the system clipboard.

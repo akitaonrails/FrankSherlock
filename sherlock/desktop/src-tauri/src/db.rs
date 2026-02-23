@@ -2024,6 +2024,7 @@ mod tests {
     /// Prepare a DB for read-only testing: checkpoint WAL, switch to DELETE
     /// journal mode, close all connections, remove WAL/SHM files, then make
     /// the containing directory read-only.
+    #[cfg(unix)]
     fn make_db_readonly(dir: &std::path::Path, db_path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         // Checkpoint and switch out of WAL mode so no WAL/SHM files are needed
@@ -2042,6 +2043,7 @@ mod tests {
         std::fs::set_permissions(dir, perms).expect("chmod");
     }
 
+    #[cfg(unix)]
     fn restore_dir_writable(dir: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(dir).expect("meta").permissions();
@@ -2050,6 +2052,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_open_conn_ro_fallback() {
         let (dir, db_path) = test_db_path();
         init_database(&db_path).expect("init");
@@ -2069,6 +2072,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_database_stats_on_readonly() {
         let (dir, db_path) = test_db_path();
         init_database(&db_path).expect("init");
