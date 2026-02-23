@@ -56,16 +56,30 @@ impl SetupDownloadState {
 #[derive(Clone)]
 struct AppState {
     paths: AppPaths,
+    read_only: bool,
     running_scan_jobs: Arc<Mutex<HashSet<i64>>>,
     setup_download: Arc<Mutex<SetupDownloadState>>,
     cancel_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
 }
 
 #[tauri::command]
-fn app_health() -> HealthStatus {
+fn app_health(state: State<'_, AppState>) -> HealthStatus {
     HealthStatus {
         status: "ok".to_string(),
-        mode: "local-only".to_string(),
+        mode: if state.read_only {
+            "read-only".to_string()
+        } else {
+            "local-only".to_string()
+        },
+        read_only: state.read_only,
+    }
+}
+
+fn require_writable(state: &AppState) -> Result<(), String> {
+    if state.read_only {
+        Err("Database is read-only".to_string())
+    } else {
+        Ok(())
     }
 }
 
@@ -76,6 +90,9 @@ fn get_app_paths(state: State<'_, AppState>) -> Result<config::AppPathsView, Str
 
 #[tauri::command]
 fn ensure_database(state: State<'_, AppState>) -> Result<models::DbStats, String> {
+    if state.read_only {
+        return db::database_stats(&state.paths.db_file).map_err(|e| e.to_string());
+    }
     db::init_database(&state.paths.db_file)
         .and_then(|_| db::database_stats(&state.paths.db_file))
         .map_err(|e| e.to_string())
@@ -154,6 +171,7 @@ async fn search_images(
 
 #[tauri::command]
 fn start_scan(root_path: String, state: State<'_, AppState>) -> Result<ScanJobStatus, String> {
+    require_writable(state.inner())?;
     let setup = compute_setup_status(state.inner());
     if !setup.is_ready {
         return Err(
@@ -193,6 +211,7 @@ fn cleanup_ollama_models() -> Result<CleanupResult, String> {
 
 #[tauri::command]
 fn cancel_scan(job_id: i64, state: State<'_, AppState>) -> Result<bool, String> {
+    require_writable(state.inner())?;
     let flags = state
         .cancel_flags
         .lock()
@@ -207,6 +226,7 @@ fn cancel_scan(job_id: i64, state: State<'_, AppState>) -> Result<bool, String> 
 
 #[tauri::command]
 fn remove_root(root_id: i64, state: State<'_, AppState>) -> Result<PurgeResult, String> {
+    require_writable(state.inner())?;
     db::purge_root(&state.paths.db_file, root_id).map_err(|e| e.to_string())
 }
 
@@ -221,7 +241,8 @@ fn load_user_config() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn save_user_config(config: serde_json::Value) -> Result<(), String> {
+fn save_user_config(config: serde_json::Value, state: State<'_, AppState>) -> Result<(), String> {
+    require_writable(state.inner())?;
     config::save_user_config(&config).map_err(|e| e.to_string())
 }
 
@@ -459,44 +480,55 @@ fn cleanup_ollama_models_impl() -> AppResult<CleanupResult> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let paths = resolve_paths()
+    let (paths, read_only) = resolve_paths()
         .and_then(|paths| {
-            prepare_dirs(&paths)?;
-            db::init_database(&paths.db_file)?;
-            db::recover_incomplete_scan_jobs(&paths.db_file)?;
+            let dirs_ok = prepare_dirs(&paths).is_ok();
+            let init_ok = dirs_ok && db::init_database(&paths.db_file).is_ok();
 
-            // Health check
-            match db::startup_health_check(&paths.db_file, &paths.db_dir) {
-                Ok(HealthCheckOutcome::RestoredFromBackup) => {
-                    log::warn!("Database restored from backup");
-                }
-                Ok(HealthCheckOutcome::Recreated) => {
-                    log::warn!("Database was recreated (previous was corrupt)");
-                }
-                Ok(HealthCheckOutcome::Healthy) => {}
-                Err(e) => {
-                    log::error!("Startup health check failed: {e}");
-                }
-            }
+            if init_ok {
+                // Full read-write mode
+                db::recover_incomplete_scan_jobs(&paths.db_file).ok();
 
-            // Purge stale roots
-            match db::validate_and_purge_stale_roots(&paths.db_file, &paths.thumbnails_dir) {
-                Ok(purged) => {
-                    for root in &purged {
-                        log::info!("Purged stale root: {root}");
+                match db::startup_health_check(&paths.db_file, &paths.db_dir) {
+                    Ok(HealthCheckOutcome::RestoredFromBackup) => {
+                        log::warn!("Database restored from backup");
+                    }
+                    Ok(HealthCheckOutcome::Recreated) => {
+                        log::warn!("Database was recreated (previous was corrupt)");
+                    }
+                    Ok(HealthCheckOutcome::Healthy) => {}
+                    Err(e) => {
+                        log::error!("Startup health check failed: {e}");
                     }
                 }
-                Err(e) => {
-                    log::warn!("Stale root validation failed: {e}");
-                }
-            }
 
-            Ok(paths)
+                match db::validate_and_purge_stale_roots(&paths.db_file, &paths.thumbnails_dir) {
+                    Ok(purged) => {
+                        for root in &purged {
+                            log::info!("Purged stale root: {root}");
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Stale root validation failed: {e}");
+                    }
+                }
+
+                Ok((paths, false))
+            } else if paths.db_file.exists() {
+                // DB exists but filesystem is not writable — read-only mode
+                log::warn!("Running in read-only mode (filesystem not writable)");
+                Ok((paths, true))
+            } else {
+                Err(AppError::Config(
+                    "Cannot create database and no existing database found".into(),
+                ))
+            }
         })
         .expect("failed to initialize application paths/database");
 
     let app_state = AppState {
         paths,
+        read_only,
         running_scan_jobs: Arc::new(Mutex::new(HashSet::new())),
         setup_download: Arc::new(Mutex::new(SetupDownloadState::idle())),
         cancel_flags: Arc::new(Mutex::new(HashMap::new())),
@@ -516,13 +548,17 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            for job in db::list_resumable_scan_jobs(&app_state.paths.db_file)? {
-                spawn_scan_worker_if_needed(app_state.clone(), job.id);
-            }
-            if let Some(root_path) = std::env::args().nth(1) {
-                let state = app.state::<AppState>();
-                if let Ok(job) = scan::start_or_resume_scan_job(&state.paths.db_file, &root_path) {
-                    spawn_scan_worker_if_needed(state.inner().clone(), job.id);
+            if !app_state.read_only {
+                for job in db::list_resumable_scan_jobs(&app_state.paths.db_file)? {
+                    spawn_scan_worker_if_needed(app_state.clone(), job.id);
+                }
+                if let Some(root_path) = std::env::args().nth(1) {
+                    let state = app.state::<AppState>();
+                    if let Ok(job) =
+                        scan::start_or_resume_scan_job(&state.paths.db_file, &root_path)
+                    {
+                        spawn_scan_worker_if_needed(state.inner().clone(), job.id);
+                    }
                 }
             }
             Ok(())

@@ -3,6 +3,7 @@
 pub struct HealthStatus {
     pub status: String,
     pub mode: String,
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
-use rusqlite::{params, params_from_iter, types::Value, Connection, Row};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OpenFlags, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
@@ -17,11 +17,38 @@ const MAX_LIMIT: u32 = 200;
 /// Centralized connection helper. Sets busy_timeout and foreign_keys on every
 /// connection so CASCADE constraints are active and concurrent access doesn't
 /// fail immediately with SQLITE_BUSY.
+///
+/// If the filesystem is read-only (e.g. sandbox, mounted RO), falls back to
+/// opening the database in read-only mode so queries still work.
 fn open_conn(db_path: &Path) -> AppResult<Connection> {
+    match try_open_rw(db_path) {
+        Ok(conn) => Ok(conn),
+        Err(ref e) if is_readonly_error(e) => {
+            let conn = Connection::open_with_flags(
+                db_path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            conn.pragma_update(None, "busy_timeout", 5000)?;
+            Ok(conn)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn try_open_rw(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path)?;
     conn.pragma_update(None, "busy_timeout", 5000)?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     Ok(conn)
+}
+
+fn is_readonly_error(e: &AppError) -> bool {
+    match e {
+        AppError::Db(rusqlite::Error::SqliteFailure(f, _)) => {
+            f.extended_code == 14 || f.code == rusqlite::ErrorCode::ReadOnly
+        }
+        _ => false,
+    }
 }
 
 pub fn init_database(db_path: &Path) -> AppResult<()> {
@@ -1587,5 +1614,72 @@ mod tests {
         assert!(paths.contains(&"/tmp/root_a"));
         assert!(paths.contains(&"/tmp/root_b"));
         assert!(paths.contains(&"/tmp/root_c"));
+    }
+
+    /// Prepare a DB for read-only testing: checkpoint WAL, switch to DELETE
+    /// journal mode, close all connections, remove WAL/SHM files, then make
+    /// the containing directory read-only.
+    fn make_db_readonly(dir: &std::path::Path, db_path: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+        // Checkpoint and switch out of WAL mode so no WAL/SHM files are needed
+        let conn = Connection::open(db_path).expect("open for journal switch");
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").expect("checkpoint");
+        conn.pragma_update(None, "journal_mode", "DELETE").expect("journal_mode");
+        drop(conn);
+        // Remove WAL/SHM files
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+        // Make directory read-only
+        let mut perms = std::fs::metadata(dir).expect("meta").permissions();
+        perms.set_mode(0o555);
+        std::fs::set_permissions(dir, perms).expect("chmod");
+    }
+
+    fn restore_dir_writable(dir: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(dir).expect("meta").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(dir, perms).expect("restore chmod");
+    }
+
+    #[test]
+    fn test_open_conn_ro_fallback() {
+        let (dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/ro_test").expect("root");
+        upsert_file_record(&db_path, &sample_record(root_id, "ro.jpg", "fp-ro")).expect("upsert");
+
+        make_db_readonly(dir.path(), &db_path);
+
+        // open_conn should fall back to RO and succeed
+        let conn = open_conn(&db_path).expect("open_conn RO fallback");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .expect("select");
+        assert_eq!(count, 1);
+
+        restore_dir_writable(dir.path());
+    }
+
+    #[test]
+    fn test_database_stats_on_readonly() {
+        let (dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/ro_stats").expect("root");
+        for i in 0..3 {
+            upsert_file_record(
+                &db_path,
+                &sample_record(root_id, &format!("f{i}.jpg"), &format!("fp-ro-{i}")),
+            )
+            .expect("upsert");
+        }
+
+        make_db_readonly(dir.path(), &db_path);
+
+        let stats = database_stats(&db_path).expect("stats RO");
+        assert_eq!(stats.roots, 1);
+        assert_eq!(stats.files, 3);
+
+        restore_dir_writable(dir.path());
     }
 }

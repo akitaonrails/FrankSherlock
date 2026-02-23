@@ -107,6 +107,16 @@ body {
   color: #fff;
 }
 
+/* ── Read-only banner ─────────────────────────────────────── */
+.readonly-banner {
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 3px 10px;
+  opacity: 0.85;
+}
+
 /* ── Main area ────────────────────────────────────────────── */
 .main-area {
   display: grid;

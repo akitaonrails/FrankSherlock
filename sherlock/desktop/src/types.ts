@@ -96,6 +96,12 @@ export type SetupStatus = {
   download: SetupDownloadStatus;
 };
 
+export type HealthStatus = {
+  status: string;
+  mode: string;
+  readOnly: boolean;
+};
+
 export type AppPaths = {
   baseDir: string;
   dbFile: string;

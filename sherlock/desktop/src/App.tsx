@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  appHealth,
   cancelScan,
   cleanupOllamaModels,
   ensureDatabase,
@@ -54,6 +55,7 @@ export default function App() {
   const [roots, setRoots] = useState<RootInfo[]>([]);
   const [selectedRootId, setSelectedRootId] = useState<number | null>(null);
   const [confirmDeleteRoot, setConfirmDeleteRoot] = useState<RootInfo | null>(null);
+  const [readOnly, setReadOnly] = useState(false);
   const requestIdRef = useRef(0);
   const configRef = useRef<Record<string, unknown>>({});
   const lastProcessedRef = useRef(0);
@@ -133,12 +135,13 @@ export default function App() {
     let mounted = true;
     (async () => {
       try {
-        const [db, setupStatus, runtimeStatus, scans, rootList] = await Promise.all([
+        const [db, setupStatus, runtimeStatus, scans, rootList, health] = await Promise.all([
           ensureDatabase(),
           getSetupStatus(),
           getRuntimeStatus(),
           listActiveScans(),
-          listRoots()
+          listRoots(),
+          appHealth()
         ]);
         if (!mounted) return;
         setDbStats(db);
@@ -146,6 +149,7 @@ export default function App() {
         setRuntime(runtimeStatus);
         setActiveScans(scans);
         setRoots(rootList);
+        setReadOnly(health.readOnly);
         if (scans.length > 0) {
           setTrackedJobId(scans[0].id);
         }
@@ -283,6 +287,7 @@ export default function App() {
   }
 
   async function onPickAndScan() {
+    if (readOnly) return;
     if (setup && !setup.isReady) {
       setError("Setup is incomplete. Finish Ollama setup before starting scans.");
       return;
@@ -305,7 +310,7 @@ export default function App() {
   }
 
   async function onCancelScan() {
-    if (!currentScan) return;
+    if (readOnly || !currentScan) return;
     try {
       await cancelScan(currentScan.id);
       setNotice("Cancelling scan...");
@@ -315,7 +320,7 @@ export default function App() {
   }
 
   async function onResumeScan() {
-    if (!currentScan) return;
+    if (readOnly || !currentScan) return;
     try {
       const job = await startScan(currentScan.rootPath);
       setTrackedJobId(job.id);
@@ -329,6 +334,7 @@ export default function App() {
   }
 
   async function onDeleteRoot(root: RootInfo) {
+    if (readOnly) return;
     setConfirmDeleteRoot(null);
     try {
       const result = await removeRoot(root.id);
@@ -489,19 +495,28 @@ export default function App() {
         </div>
       </div>
 
+      {/* ── Read-Only Banner ── */}
+      {readOnly && (
+        <div className="readonly-banner">
+          Read-only mode — database cannot be modified
+        </div>
+      )}
+
       {/* ── Main Area ── */}
       <div className={`main-area${sidebarOpen ? "" : " sidebar-collapsed"}`}>
         {/* ── Sidebar ── */}
         <aside className="sidebar">
           <div className="sidebar-section">
             <span>Folders</span>
-            <button
-              type="button"
-              className="sidebar-add-btn"
-              onClick={onPickAndScan}
-              disabled={setup ? !setup.isReady : true}
-              title="Add folder to scan"
-            >+</button>
+            {!readOnly && (
+              <button
+                type="button"
+                className="sidebar-add-btn"
+                onClick={onPickAndScan}
+                disabled={setup ? !setup.isReady : true}
+                title="Add folder to scan"
+              >+</button>
+            )}
           </div>
 
           {roots.length === 0 && (
@@ -532,13 +547,15 @@ export default function App() {
                   <div className="root-card-header">
                     <span className="root-card-icon">&#128193;</span>
                     <span className="root-card-name" title={root.rootPath}>{root.rootName}</span>
-                    <button
-                      type="button"
-                      className="root-card-delete"
-                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteRoot(root); }}
-                      title="Remove folder"
-                      aria-label={`Remove ${root.rootName}`}
-                    >&times;</button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="root-card-delete"
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteRoot(root); }}
+                        title="Remove folder"
+                        aria-label={`Remove ${root.rootName}`}
+                      >&times;</button>
+                    )}
                   </div>
                   <div className="root-card-meta">
                     <span>{root.fileCount.toLocaleString()} files</span>
@@ -564,13 +581,13 @@ export default function App() {
               <div className="sidebar-scan-meta">
                 +{currentScan.added} new, {currentScan.modified} mod, {currentScan.moved} moved
               </div>
-              <button type="button" onClick={onCancelScan}>Cancel Scan</button>
+              {!readOnly && <button type="button" onClick={onCancelScan}>Cancel Scan</button>}
             </div>
           )}
           {currentScan && currentScan.status === "interrupted" && (
             <div className="sidebar-scan-progress">
               <div>Interrupted at {currentScan.processedFiles} / {currentScan.totalFiles}</div>
-              <button type="button" onClick={onResumeScan}>Resume Scan</button>
+              {!readOnly && <button type="button" onClick={onResumeScan}>Resume Scan</button>}
             </div>
           )}
 
