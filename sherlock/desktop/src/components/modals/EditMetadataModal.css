@@ -1,14 +1,38 @@
 .edit-metadata-modal {
-  width: 420px;
-  max-height: 80vh;
+  width: min(540px, 90vw);
+  height: min(80vh, 700px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.edit-metadata-modal h3 {
+  flex-shrink: 0;
+}
+
+/* Scrollable form body that fills remaining space */
+.edit-metadata-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
+  gap: 10px;
 }
 
 .edit-metadata-modal label {
   display: block;
-  margin-bottom: 10px;
+  flex-shrink: 0;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
+}
+
+/* Textarea labels grow to fill available space */
+.edit-metadata-modal label.grow {
+  flex: 1;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
 }
 
 .edit-metadata-modal label span {
@@ -16,6 +40,7 @@
   margin-bottom: 3px;
   color: var(--text-primary);
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .edit-metadata-modal select,
@@ -41,6 +66,17 @@
 
 .edit-metadata-modal textarea {
   resize: vertical;
+}
+
+/* Inside a .grow label, textarea fills remaining space */
+.edit-metadata-modal label.grow textarea {
+  flex: 1;
+  min-height: 60px;
+}
+
+.edit-metadata-modal .modal-actions {
+  flex-shrink: 0;
+  padding-top: 10px;
 }
 
 .edit-metadata-loading {

@@ -77,7 +77,7 @@ export default function EditMetadataModal({ fileId, onSave, onCancel }: Props) {
         {loadError && <p className="edit-metadata-error">{loadError}</p>}
 
         {!loading && !loadError && (
-          <>
+          <div className="edit-metadata-form">
             <label>
               <span>Type</span>
               <select value={mediaType} onChange={(e) => setMediaType(e.target.value)}>
@@ -87,19 +87,17 @@ export default function EditMetadataModal({ fileId, onSave, onCancel }: Props) {
               </select>
             </label>
 
-            <label>
+            <label className="grow">
               <span>Description</span>
               <textarea
-                rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
             </label>
 
-            <label>
+            <label className="grow">
               <span>Extracted text</span>
               <textarea
-                rows={3}
                 value={extractedText}
                 onChange={(e) => setExtractedText(e.target.value)}
               />
@@ -129,7 +127,7 @@ export default function EditMetadataModal({ fileId, onSave, onCancel }: Props) {
               <button type="button" onClick={onCancel}>Cancel</button>
               <button type="button" onClick={handleSave}>Save</button>
             </div>
-          </>
+          </div>
         )}
       </div>
     </ModalOverlay>

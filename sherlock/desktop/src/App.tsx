@@ -3,8 +3,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addFilesToAlbum, copyFilesToClipboard, createAlbum, createSmartFolder,
   deleteAlbum, deleteFiles, deleteSmartFolder, ensureDatabase, getCliFolderPath,
-  listAlbums, listRoots, listSmartFolders, removeRoot, renameFile, startScan,
-  updateFileMetadata,
+  getFileMetadata, listAlbums, listRoots, listSmartFolders, removeRoot,
+  renameFile, startScan, updateFileMetadata,
 } from "./api";
 import type {
   Album,
@@ -69,6 +69,7 @@ export default function App() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenuMeta, setContextMenuMeta] = useState<{ description: string; extractedText: string } | null>(null);
   const [confirmDeleteFiles, setConfirmDeleteFiles] = useState<SearchItem[] | null>(null);
   const [renameItem, setRenameItem] = useState<SearchItem | null>(null);
   const [showModelInfo, setShowModelInfo] = useState(false);
@@ -330,9 +331,22 @@ export default function App() {
     e.preventDefault();
     if (!selectedIndices.has(idx)) selectOnly(idx);
     setContextMenu({ x: e.clientX, y: e.clientY });
+
+    // For single selection, fetch metadata (description + OCR text) for context menu
+    const effectiveSelection = selectedIndices.has(idx) ? selectedIndices : new Set([idx]);
+    if (effectiveSelection.size === 1) {
+      const item = items[idx];
+      if (item) {
+        getFileMetadata(item.id)
+          .then((meta) => setContextMenuMeta({ description: meta.description, extractedText: meta.extractedText }))
+          .catch(() => setContextMenuMeta(null));
+      }
+    } else {
+      setContextMenuMeta(null);
+    }
   }
 
-  function handleContextCopy() {
+  function handleContextCopyPath() {
     setContextMenu(null);
     const paths = [...selectedIndices].sort((a, b) => a - b)
       .filter(i => i < items.length)
@@ -341,6 +355,20 @@ export default function App() {
       copyFilesToClipboard(paths).catch(() => {});
       setNotice(`Copied ${paths.length} file path(s)`);
     }
+  }
+
+  function handleContextCopyDescription() {
+    setContextMenu(null);
+    if (!contextMenuMeta?.description) return;
+    copyFilesToClipboard([contextMenuMeta.description]).catch(() => {});
+    setNotice("Copied description");
+  }
+
+  function handleContextCopyOcrText() {
+    setContextMenu(null);
+    if (!contextMenuMeta?.extractedText) return;
+    copyFilesToClipboard([contextMenuMeta.extractedText]).catch(() => {});
+    setNotice("Copied OCR text");
   }
 
   function handleContextRename() {
@@ -554,7 +582,11 @@ export default function App() {
           y={contextMenu.y}
           selectedCount={selectedIndices.size}
           albums={albums}
-          onCopy={handleContextCopy}
+          description={contextMenuMeta?.description ?? null}
+          extractedText={contextMenuMeta?.extractedText ?? null}
+          onCopyPath={handleContextCopyPath}
+          onCopyDescription={handleContextCopyDescription}
+          onCopyOcrText={handleContextCopyOcrText}
           onRename={handleContextRename}
           onEditMetadata={handleContextEditMetadata}
           onDelete={handleContextDelete}

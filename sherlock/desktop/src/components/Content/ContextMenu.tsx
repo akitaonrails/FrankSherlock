@@ -7,7 +7,11 @@ type Props = {
   y: number;
   selectedCount: number;
   albums: Album[];
-  onCopy: () => void;
+  description: string | null;
+  extractedText: string | null;
+  onCopyPath: () => void;
+  onCopyDescription: () => void;
+  onCopyOcrText: () => void;
   onRename: () => void;
   onEditMetadata: () => void;
   onDelete: () => void;
@@ -17,8 +21,8 @@ type Props = {
 };
 
 export default function ContextMenu({
-  x, y, selectedCount, albums,
-  onCopy, onRename, onEditMetadata, onDelete,
+  x, y, selectedCount, albums, description, extractedText,
+  onCopyPath, onCopyDescription, onCopyOcrText, onRename, onEditMetadata, onDelete,
   onAddToAlbum, onCreateAlbumFromSelection, onClose,
 }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -66,10 +70,22 @@ export default function ContextMenu({
       style={{ left: x, top: y }}
       role="menu"
     >
-      <button className="context-menu-item" role="menuitem" onClick={onCopy}>
-        <span>Copy</span>
+      <button className="context-menu-item" role="menuitem" onClick={onCopyPath}>
+        <span>Copy Path</span>
         <span className="context-menu-shortcut">Ctrl+C</span>
       </button>
+
+      {selectedCount === 1 && description && (
+        <button className="context-menu-item" role="menuitem" onClick={onCopyDescription}>
+          <span>Copy Description</span>
+        </button>
+      )}
+
+      {selectedCount === 1 && extractedText && (
+        <button className="context-menu-item" role="menuitem" onClick={onCopyOcrText}>
+          <span>Copy OCR Text</span>
+        </button>
+      )}
 
       {selectedCount === 1 && (
         <button className="context-menu-item" role="menuitem" onClick={onRename}>
