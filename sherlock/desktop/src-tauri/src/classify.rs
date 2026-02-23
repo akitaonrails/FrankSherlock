@@ -75,7 +75,13 @@ const RECEIPT_PROMPT: &str = concat!(
 );
 
 const VALID_MEDIA_TYPES: &[&str] = &[
-    "screenshot", "anime", "manga", "photo", "document", "artwork", "other",
+    "screenshot",
+    "anime",
+    "manga",
+    "photo",
+    "document",
+    "artwork",
+    "other",
 ];
 
 // ---------------------------------------------------------------------------
@@ -331,13 +337,20 @@ pub fn normalize_list(value: &Value) -> Vec<String> {
     arr.iter()
         .filter_map(|x| x.as_str())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && !matches!(s.to_lowercase().as_str(), "null" | "none" | "unknown"))
+        .filter(|s| {
+            !s.is_empty() && !matches!(s.to_lowercase().as_str(), "null" | "none" | "unknown")
+        })
         .collect()
 }
 
 pub fn clean_nullable_str(value: &Value) -> Option<String> {
     let s = value.as_str()?.trim();
-    if s.is_empty() || matches!(s.to_lowercase().as_str(), "null" | "none" | "unknown" | "n/a") {
+    if s.is_empty()
+        || matches!(
+            s.to_lowercase().as_str(),
+            "null" | "none" | "unknown" | "n/a"
+        )
+    {
         return None;
     }
     Some(s.to_string())
@@ -390,16 +403,21 @@ pub fn extract_receipt_regex(text: &str) -> Value {
         r"\b[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}\b",
         r"\b[0-9]+(?:\.[0-9]{2})\b",
     ];
-    let transaction_patterns =
-        [r"(?i)\b(?:ID|Tx|Transaction|Protocolo|Comprovante|Reference)[:\s#-]*([A-Za-z0-9\-_/]{6,})\b"];
+    let transaction_patterns = [
+        r"(?i)\b(?:ID|Tx|Transaction|Protocolo|Comprovante|Reference)[:\s#-]*([A-Za-z0-9\-_/]{6,})\b",
+    ];
 
-    fn collect_matches(text: &str, patterns: &[&str]) -> Vec<String> {
+    fn collect_matches(text: &str, patterns: &[&'static str]) -> Vec<String> {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for pat in patterns {
             if let Ok(re) = Regex::new(pat) {
                 for cap in re.captures_iter(text) {
-                    let val = cap.get(1).unwrap_or_else(|| cap.get(0).unwrap()).as_str().to_string();
+                    let val = cap
+                        .get(1)
+                        .unwrap_or_else(|| cap.get(0).unwrap())
+                        .as_str()
+                        .to_string();
                     if !seen.contains(&val) {
                         seen.insert(val.clone());
                         out.push(val);
@@ -410,9 +428,18 @@ pub fn extract_receipt_regex(text: &str) -> Value {
         out
     }
 
-    let dates: Vec<String> = collect_matches(text, &date_patterns).into_iter().take(6).collect();
-    let amounts: Vec<String> = collect_matches(text, &amount_patterns).into_iter().take(10).collect();
-    let refs: Vec<String> = collect_matches(text, &transaction_patterns).into_iter().take(10).collect();
+    let dates: Vec<String> = collect_matches(text, &date_patterns)
+        .into_iter()
+        .take(6)
+        .collect();
+    let amounts: Vec<String> = collect_matches(text, &amount_patterns)
+        .into_iter()
+        .take(10)
+        .collect();
+    let refs: Vec<String> = collect_matches(text, &transaction_patterns)
+        .into_iter()
+        .take(10)
+        .collect();
 
     let currency = if text.contains("R$") {
         Some("BRL")
@@ -543,11 +570,8 @@ fn classify_anime_details(model: &str, image_path: &Path, tmp_dir: &Path) -> Opt
     let resp = ollama_generate(model, ANIME_PROMPT, Some(&effective_path), 600, 180, true);
     if resp.ok {
         if let Some(v) = parse_json_response(&resp.raw) {
-            let conf = v
-                .get("confidence")
-                .and_then(|c| c.as_f64())
-                .unwrap_or(0.0);
-            let has_data = v.get("series").and_then(|s| clean_nullable_str(s)).is_some()
+            let conf = v.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.0);
+            let has_data = v.get("series").and_then(clean_nullable_str).is_some()
                 || v.get("characters")
                     .and_then(|a| a.as_array())
                     .map(|a| !a.is_empty())
@@ -574,12 +598,8 @@ fn classify_anime_details(model: &str, image_path: &Path, tmp_dir: &Path) -> Opt
 // Stage 2b: OCR
 // ---------------------------------------------------------------------------
 
-fn run_surya_ocr(
-    image_path: &Path,
-    surya_venv: &Path,
-    surya_script: &Path,
-) -> OcrResult {
-    let python_bin = surya_venv.join("bin").join("python");
+fn run_surya_ocr(image_path: &Path, surya_venv: &Path, surya_script: &Path) -> OcrResult {
+    let python_bin = crate::platform::python::python_venv_binary(surya_venv);
     if !python_bin.exists() || !surya_script.exists() {
         return OcrResult {
             ok: false,
@@ -604,10 +624,7 @@ fn run_surya_ocr(
                     .and_then(|t| t.as_str())
                     .unwrap_or("")
                     .to_string();
-                let line_count = v
-                    .get("line_count")
-                    .and_then(|n| n.as_u64())
-                    .unwrap_or(0);
+                let line_count = v.get("line_count").and_then(|n| n.as_u64()).unwrap_or(0);
                 return OcrResult {
                     ok,
                     engine: "surya".to_string(),
@@ -712,7 +729,7 @@ fn extract_document_fields(model: &str, ocr_text: &str) -> Value {
     }
 
     // Fall back to regex for currency and reference_numbers
-    if doc.get("currency").and_then(|v| clean_nullable_str(v)).is_none() {
+    if doc.get("currency").and_then(clean_nullable_str).is_none() {
         if let Some(c) = regex_fields.get("currency_guess").and_then(|v| v.as_str()) {
             doc["currency"] = serde_json::json!(c);
         }
@@ -814,19 +831,21 @@ pub fn classify_image(
     // Anime enrichment
     if should_run_anime_enrichment(&primary) {
         if let Some(anime) = classify_anime_details(model, image_path, tmp_dir) {
-            if let Some(series) = anime.get("series").and_then(|v| clean_nullable_str(v)) {
+            if let Some(series) = anime.get("series").and_then(clean_nullable_str) {
                 full_description = format!("{full_description} [Series: {series}]");
             }
-            let mentions = normalize_list(
-                anime.get("canonical_mentions").unwrap_or(&Value::Null),
-            );
+            let mentions = normalize_list(anime.get("canonical_mentions").unwrap_or(&Value::Null));
             if !mentions.is_empty() {
                 canonical_mentions = mentions.join(", ");
             }
             if let Some(chars) = anime.get("characters").and_then(|v| v.as_array()) {
                 let char_names: Vec<String> = chars
                     .iter()
-                    .filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                    .filter_map(|c| {
+                        c.get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.to_string())
+                    })
                     .collect();
                 if !char_names.is_empty() && canonical_mentions.is_empty() {
                     canonical_mentions = char_names.join(", ");
@@ -836,16 +855,8 @@ pub fn classify_image(
     }
 
     // Also add series/character candidates from primary to canonical_mentions
-    let series_cands = normalize_list(
-        primary
-            .get("series_candidates")
-            .unwrap_or(&Value::Null),
-    );
-    let char_cands = normalize_list(
-        primary
-            .get("character_candidates")
-            .unwrap_or(&Value::Null),
-    );
+    let series_cands = normalize_list(primary.get("series_candidates").unwrap_or(&Value::Null));
+    let char_cands = normalize_list(primary.get("character_candidates").unwrap_or(&Value::Null));
     let mut all_mentions: Vec<String> = Vec::new();
     if !canonical_mentions.is_empty() {
         all_mentions.extend(canonical_mentions.split(", ").map(|s| s.to_string()));
@@ -865,16 +876,10 @@ pub fn classify_image(
             extracted_text = ocr.text.clone();
 
             let doc_fields = extract_document_fields(model, &ocr.text);
-            if let Some(kind) = doc_fields
-                .get("document_kind")
-                .and_then(|v| clean_nullable_str(v))
-            {
+            if let Some(kind) = doc_fields.get("document_kind").and_then(clean_nullable_str) {
                 full_description = format!("{full_description} [Doc: {kind}]");
             }
-            if let Some(issuer) = doc_fields
-                .get("issuer")
-                .and_then(|v| clean_nullable_str(v))
-            {
+            if let Some(issuer) = doc_fields.get("issuer").and_then(clean_nullable_str) {
                 full_description = format!("{full_description} [Issuer: {issuer}]");
             }
         }
@@ -898,8 +903,17 @@ fn detect_lang_hint(text: &str) -> String {
     }
     let lower = text.to_lowercase();
     // Simple heuristic based on common words
-    let pt_words = ["comprovante", "transferência", "valor", "banco", "realizado", "pagamento"];
-    let ja_chars = text.chars().any(|c| ('\u{3040}'..='\u{30FF}').contains(&c) || ('\u{4E00}'..='\u{9FFF}').contains(&c));
+    let pt_words = [
+        "comprovante",
+        "transferência",
+        "valor",
+        "banco",
+        "realizado",
+        "pagamento",
+    ];
+    let ja_chars = text
+        .chars()
+        .any(|c| ('\u{3040}'..='\u{30FF}').contains(&c) || ('\u{4E00}'..='\u{9FFF}').contains(&c));
 
     if ja_chars {
         return "ja".to_string();

@@ -94,6 +94,9 @@ export type SetupStatus = {
   missingModels: string[];
   instructions: string[];
   download: SetupDownloadStatus;
+  pythonAvailable: boolean;
+  pythonVersion: string | null;
+  suryaVenvOk: boolean;
 };
 
 export type HealthStatus = {

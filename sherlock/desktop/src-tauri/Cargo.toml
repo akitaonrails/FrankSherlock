@@ -36,6 +36,7 @@ image = "0.25"
 base64 = "0.22"
 walkdir = "2"
 arboard = "3"
+which = "7"
 
 [dev-dependencies]
 tempfile = "3"

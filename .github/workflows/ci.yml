@@ -12,7 +12,15 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+          - platform: macos-latest
+          - platform: windows-latest
+
+    runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout
@@ -27,6 +35,7 @@ jobs:
           workspaces: sherlock/desktop/src-tauri -> target
 
       - name: Install Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -62,3 +71,7 @@ jobs:
       - name: Build frontend
         working-directory: sherlock/desktop
         run: npm run build
+
+      - name: Run frontend tests
+        working-directory: sherlock/desktop
+        run: npm run test

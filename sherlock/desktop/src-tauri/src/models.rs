@@ -172,6 +172,9 @@ pub struct SetupStatus {
     pub missing_models: Vec<String>,
     pub instructions: Vec<String>,
     pub download: SetupDownloadStatus,
+    pub python_available: bool,
+    pub python_version: Option<String>,
+    pub surya_venv_ok: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -13,27 +13,13 @@ pub fn gather_runtime_status() -> RuntimeStatus {
         }
     }
 
-    let (vram_used_mib, vram_total_mib) = if let Ok(output) = Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=memory.used,memory.total",
-            "--format=csv,noheader,nounits",
-        ])
-        .output()
-    {
-        if output.status.success() {
-            parse_nvidia_smi_output(&String::from_utf8_lossy(&output.stdout))
-        } else {
-            (None, None)
-        }
-    } else {
-        (None, None)
-    };
+    let gpu = crate::platform::gpu::detect_gpu_memory();
 
     RuntimeStatus {
         current_model: loaded_models.first().cloned(),
         loaded_models,
-        vram_used_mib,
-        vram_total_mib,
+        vram_used_mib: gpu.vram_used_mib,
+        vram_total_mib: gpu.vram_total_mib,
         ollama_available,
     }
 }
@@ -62,16 +48,6 @@ fn parse_ollama_ps_output(text: &str) -> Vec<String> {
     out
 }
 
-fn parse_nvidia_smi_output(text: &str) -> (Option<u64>, Option<u64>) {
-    let Some(first_line) = text.lines().next() else {
-        return (None, None);
-    };
-    let mut parts = first_line.split(',');
-    let used = parts.next().and_then(|v| v.trim().parse::<u64>().ok());
-    let total = parts.next().and_then(|v| v.trim().parse::<u64>().ok());
-    (used, total)
-}
-
 fn parse_ollama_list_output(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines().skip(1) {
@@ -95,14 +71,6 @@ mod tests {
         let sample = "NAME ID SIZE PROCESSOR UNTIL\nqwen2.5vl:7b abc 6.0 GB 100% GPU 4 minutes\n";
         let models = parse_ollama_ps_output(sample);
         assert_eq!(models, vec!["qwen2.5vl:7b".to_string()]);
-    }
-
-    #[test]
-    fn parses_nvidia_memory() {
-        let sample = "1024, 24564\n";
-        let (used, total) = parse_nvidia_smi_output(sample);
-        assert_eq!(used, Some(1024));
-        assert_eq!(total, Some(24564));
     }
 
     #[test]

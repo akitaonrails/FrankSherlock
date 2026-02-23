@@ -309,6 +309,7 @@ pub fn get_scan_job_state(db_path: &Path, job_id: i64) -> AppResult<ScanJobState
     .map_err(AppError::from)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn checkpoint_scan_job(
     db_path: &Path,
     job_id: i64,
@@ -456,9 +457,8 @@ pub fn get_deleted_file_paths(
     deleted_at: i64,
 ) -> AppResult<Vec<(String, Option<String>)>> {
     let conn = open_conn(db_path)?;
-    let mut stmt = conn.prepare(
-        "SELECT rel_path, thumb_path FROM files WHERE root_id = ?1 AND deleted_at = ?2",
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT rel_path, thumb_path FROM files WHERE root_id = ?1 AND deleted_at = ?2")?;
     let rows = stmt.query_map(params![root_id, deleted_at], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
     })?;
@@ -545,6 +545,7 @@ pub fn upsert_file_record(db_path: &Path, record: &FileRecordUpsert) -> AppResul
     Ok(file_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn move_file_by_id(
     db_path: &Path,
     file_id: i64,
@@ -671,20 +672,14 @@ pub fn purge_root(db_path: &Path, root_id: i64) -> AppResult<PurgeResult> {
     let tx = conn.unchecked_transaction()?;
 
     // Collect file IDs and thumb_paths for cleanup
-    let mut stmt =
-        tx.prepare("SELECT id, thumb_path FROM files WHERE root_id = ?1")?;
+    let mut stmt = tx.prepare("SELECT id, thumb_path FROM files WHERE root_id = ?1")?;
     let file_rows: Vec<(i64, Option<String>)> = stmt
-        .query_map(params![root_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
+        .query_map(params![root_id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
 
     let file_ids: Vec<i64> = file_rows.iter().map(|(id, _)| *id).collect();
-    let thumb_paths: Vec<String> = file_rows
-        .iter()
-        .filter_map(|(_, tp)| tp.clone())
-        .collect();
+    let thumb_paths: Vec<String> = file_rows.iter().filter_map(|(_, tp)| tp.clone()).collect();
 
     // Delete FTS entries
     for id in &file_ids {
@@ -706,10 +701,8 @@ pub fn purge_root(db_path: &Path, root_id: i64) -> AppResult<PurgeResult> {
     let mut thumbs_cleaned = 0u64;
     for tp in &thumb_paths {
         let path = Path::new(tp);
-        if path.exists() {
-            if std::fs::remove_file(path).is_ok() {
-                thumbs_cleaned += 1;
-            }
+        if path.exists() && std::fs::remove_file(path).is_ok() {
+            thumbs_cleaned += 1;
         }
     }
 
@@ -774,16 +767,13 @@ pub fn startup_health_check(db_path: &Path, backup_dir: &Path) -> AppResult<Heal
     if !db_path.exists() {
         return Ok(HealthCheckOutcome::Healthy);
     }
-    match quick_check(db_path) {
-        Ok(true) => return Ok(HealthCheckOutcome::Healthy),
-        Ok(false) | Err(_) => {}
+    if let Ok(true) = quick_check(db_path) {
+        return Ok(HealthCheckOutcome::Healthy);
     }
     // Database is corrupt — attempt restore
     let backup_path = backup_dir.join("index.sqlite.bak");
-    if backup_path.exists() {
-        if restore_from_backup(&backup_path, db_path).is_ok() {
-            return Ok(HealthCheckOutcome::RestoredFromBackup);
-        }
+    if backup_path.exists() && restore_from_backup(&backup_path, db_path).is_ok() {
+        return Ok(HealthCheckOutcome::RestoredFromBackup);
     }
     // No backup or restore failed — recreate
     recreate_database(db_path)?;
@@ -1040,13 +1030,13 @@ fn normalize_media_types(values: &[String]) -> Vec<String> {
 fn parse_date_start_ns(value: &str) -> Option<i64> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
     let dt = NaiveDateTime::new(date, NaiveTime::MIN);
-    Some(Utc.from_utc_datetime(&dt).timestamp_nanos_opt()?)
+    Utc.from_utc_datetime(&dt).timestamp_nanos_opt()
 }
 
 fn parse_date_end_ns(value: &str) -> Option<i64> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
     let dt = NaiveDateTime::new(date, NaiveTime::from_hms_opt(23, 59, 59)?);
-    Some(Utc.from_utc_datetime(&dt).timestamp_nanos_opt()?)
+    Utc.from_utc_datetime(&dt).timestamp_nanos_opt()
 }
 
 fn to_fts_query(input: &str) -> String {
@@ -1430,19 +1420,28 @@ mod tests {
 
         // Insert files
         for i in 0..3 {
-            upsert_file_record(&db_path, &sample_record(root_id, &format!("f{i}.jpg"), &format!("fp{i}")))
-                .expect("upsert");
+            upsert_file_record(
+                &db_path,
+                &sample_record(root_id, &format!("f{i}.jpg"), &format!("fp{i}")),
+            )
+            .expect("upsert");
         }
         // Create a scan job
         create_or_resume_scan_job(&db_path, "/tmp/purge_test").expect("job");
 
         // Verify data exists
         let conn = open_conn(&db_path).expect("open");
-        let file_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files WHERE root_id = ?1", params![root_id], |r| r.get(0)).expect("count");
+        let file_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE root_id = ?1",
+                params![root_id],
+                |r| r.get(0),
+            )
+            .expect("count");
         assert_eq!(file_count, 3);
-        let fts_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts count");
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0))
+            .expect("fts count");
         assert!(fts_count >= 3);
         drop(conn);
 
@@ -1453,14 +1452,25 @@ mod tests {
 
         // Verify everything is gone
         let conn = open_conn(&db_path).expect("open");
-        let root_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM roots WHERE id = ?1", params![root_id], |r| r.get(0)).expect("root count");
+        let root_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM roots WHERE id = ?1",
+                params![root_id],
+                |r| r.get(0),
+            )
+            .expect("root count");
         assert_eq!(root_count, 0);
-        let file_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files WHERE root_id = ?1", params![root_id], |r| r.get(0)).expect("file count");
+        let file_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE root_id = ?1",
+                params![root_id],
+                |r| r.get(0),
+            )
+            .expect("file count");
         assert_eq!(file_count, 0);
-        let fts_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts count");
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0))
+            .expect("fts count");
         assert_eq!(fts_count, 0);
     }
 
@@ -1472,12 +1482,20 @@ mod tests {
 
         // Insert a file with scan_marker=1
         let rec = sample_record(root_id, "gone.jpg", "fp-gone");
-        upsert_file_record(&db_path, &FileRecordUpsert { scan_marker: 1, ..rec }).expect("upsert");
+        upsert_file_record(
+            &db_path,
+            &FileRecordUpsert {
+                scan_marker: 1,
+                ..rec
+            },
+        )
+        .expect("upsert");
 
         // Verify FTS entry exists
         let conn = open_conn(&db_path).expect("open");
-        let fts_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts");
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0))
+            .expect("fts");
         assert_eq!(fts_count, 1);
         drop(conn);
 
@@ -1487,8 +1505,9 @@ mod tests {
 
         // Verify FTS entry is gone
         let conn = open_conn(&db_path).expect("open");
-        let fts_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts");
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0))
+            .expect("fts");
         assert_eq!(fts_count, 0);
     }
 
@@ -1504,8 +1523,7 @@ mod tests {
         let (dir, db_path) = test_db_path();
         init_database(&db_path).expect("init");
         let root_id = upsert_root(&db_path, "/tmp/backup_test").expect("root");
-        upsert_file_record(&db_path, &sample_record(root_id, "img.jpg", "fp-img"))
-            .expect("upsert");
+        upsert_file_record(&db_path, &sample_record(root_id, "img.jpg", "fp-img")).expect("upsert");
 
         // Backup
         let backup_path = dir.path().join("backup.sqlite");
@@ -1555,7 +1573,11 @@ mod tests {
         let conn = open_conn(&db_path).expect("open");
         conn.execute(
             "INSERT INTO roots(root_path, root_name, created_at) VALUES (?1, ?2, ?3)",
-            params!["/nonexistent/path/that/does/not/exist", "ghost", now_epoch_secs()],
+            params![
+                "/nonexistent/path/that/does/not/exist",
+                "ghost",
+                now_epoch_secs()
+            ],
         )
         .expect("insert root");
         drop(conn);
@@ -1626,8 +1648,10 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         // Checkpoint and switch out of WAL mode so no WAL/SHM files are needed
         let conn = Connection::open(db_path).expect("open for journal switch");
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").expect("checkpoint");
-        conn.pragma_update(None, "journal_mode", "DELETE").expect("journal_mode");
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .expect("checkpoint");
+        conn.pragma_update(None, "journal_mode", "DELETE")
+            .expect("journal_mode");
         drop(conn);
         // Remove WAL/SHM files
         let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));

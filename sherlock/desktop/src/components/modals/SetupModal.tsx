@@ -27,6 +27,16 @@ export default function SetupModal({ setup, onRecheck, onDownload }: Props) {
             <strong>Missing</strong>
             <p>{setup.missingModels.length ? setup.missingModels.join(", ") : "None"}</p>
           </div>
+          <div>
+            <strong>OCR (Surya)</strong>
+            <p>
+              {setup.suryaVenvOk
+                ? `Ready${setup.pythonVersion ? ` (Python ${setup.pythonVersion})` : ""}`
+                : setup.pythonAvailable
+                  ? "Python found, venv issue"
+                  : "Not available"}
+            </p>
+          </div>
         </div>
         <ul className="setup-instructions">
           {setup.instructions.map((instruction) => (

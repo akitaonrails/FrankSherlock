@@ -4,11 +4,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Returns the absolute path to the thumbnail, or `None` if generation fails.
 /// Skips regeneration if the thumbnail already exists and the source hasn't changed.
-pub fn generate_thumbnail(
-    source_path: &Path,
-    thumb_dir: &Path,
-    rel_path: &str,
-) -> Option<String> {
+pub fn generate_thumbnail(source_path: &Path, thumb_dir: &Path, rel_path: &str) -> Option<String> {
     let stem = Path::new(rel_path)
         .with_extension("jpg")
         .to_string_lossy()
@@ -80,9 +76,7 @@ pub fn generate_thumbnail(
 
 /// For GIF files, extract the first frame. For other formats, return as-is.
 fn first_frame_if_gif(path: &Path) -> PathBuf {
-    let ext = path
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase());
+    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase());
     if ext.as_deref() != Some("gif") {
         return path.to_path_buf();
     }
@@ -113,7 +107,10 @@ mod tests {
         assert!(result.is_some());
         let thumb_path = PathBuf::from(result.unwrap());
         assert!(thumb_path.exists());
-        assert!(thumb_path.display().to_string().ends_with("subdir/photo.jpg"));
+        assert!(thumb_path
+            .display()
+            .to_string()
+            .ends_with("subdir/photo.jpg"));
 
         // Verify the thumbnail is smaller
         let thumb_img = image::open(&thumb_path).expect("open thumb");
@@ -130,20 +127,14 @@ mod tests {
         assert!(r1.is_some());
 
         let thumb_path = PathBuf::from(r1.as_ref().unwrap());
-        let mtime1 = std::fs::metadata(&thumb_path)
-            .unwrap()
-            .modified()
-            .unwrap();
+        let mtime1 = std::fs::metadata(&thumb_path).unwrap().modified().unwrap();
 
         // Generate again - should skip
         std::thread::sleep(std::time::Duration::from_millis(50));
         let r2 = generate_thumbnail(&source, thumb_dir.path(), "pic.png");
         assert!(r2.is_some());
 
-        let mtime2 = std::fs::metadata(&thumb_path)
-            .unwrap()
-            .modified()
-            .unwrap();
+        let mtime2 = std::fs::metadata(&thumb_path).unwrap().modified().unwrap();
         assert_eq!(mtime1, mtime2);
     }
 

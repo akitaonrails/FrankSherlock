@@ -61,6 +61,7 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 npm run tauri:dev
 | `lib.rs` | Tauri commands, scan worker spawning, setup/download flow, auto-cleanup, scan cancellation |
 | `query_parser.rs` | Natural language query parsing (media type, dates, confidence) |
 | `runtime.rs` | Ollama/nvidia-smi status gathering |
+| `platform/` | OS abstraction: clipboard, GPU detection, Python venv paths, executable lookup |
 
 ## Architecture Principles
 
@@ -69,6 +70,7 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 npm run tauri:dev
 - **Move-aware**: Renamed/moved files detected by fingerprint, preserving all classification data.
 - **Resilient**: Scan jobs checkpoint after each file. Interrupted scans resume from last cursor.
 - **Local-only**: No cloud APIs. Ollama runs locally, Surya OCR runs in an isolated venv.
+- **Multi-OS**: All features must work on Linux, macOS, and Windows. OS-specific code lives exclusively in `src-tauri/src/platform/`. Never use OS-specific paths, commands, or assumptions outside this module. CI tests all three platforms on every push.
 
 ## Coding Conventions
 

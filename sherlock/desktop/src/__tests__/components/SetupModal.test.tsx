@@ -11,6 +11,9 @@ const mockSetup: SetupStatus = {
   missingModels: ["qwen2.5vl:7b"],
   instructions: ["Install Ollama", "Pull the model"],
   download: { status: "idle", progressPct: 0, message: "Ready to download" },
+  pythonAvailable: false,
+  pythonVersion: null,
+  suryaVenvOk: false,
 };
 
 describe("SetupModal", () => {

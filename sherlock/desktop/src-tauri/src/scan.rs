@@ -396,12 +396,7 @@ fn probe_to_record(
     }
 }
 
-fn cleanup_deleted_caches(
-    db_path: &Path,
-    root_id: i64,
-    deleted_at: i64,
-    thumbnails_dir: &Path,
-) {
+fn cleanup_deleted_caches(db_path: &Path, root_id: i64, deleted_at: i64, thumbnails_dir: &Path) {
     let paths = match db::get_deleted_file_paths(db_path, root_id, deleted_at) {
         Ok(p) => p,
         Err(e) => {
@@ -563,11 +558,12 @@ mod tests {
         for name in &["a.jpg", "b.jpg", "c.jpg"] {
             let img = root_dir.path().join(name);
             let mut f = File::create(&img).expect("create");
-            f.write_all(format!("data-{name}").as_bytes()).expect("write");
+            f.write_all(format!("data-{name}").as_bytes())
+                .expect("write");
         }
 
-        let job = start_or_resume_scan_job(&db_path, root_dir.path().to_str().unwrap())
-            .expect("job");
+        let job =
+            start_or_resume_scan_job(&db_path, root_dir.path().to_str().unwrap()).expect("job");
         let ctx = make_scan_context(&db_path);
 
         // Set cancel flag before running

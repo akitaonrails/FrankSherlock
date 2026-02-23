@@ -3,13 +3,14 @@ mod config;
 mod db;
 mod error;
 mod models;
+mod platform;
 mod query_parser;
 mod runtime;
 mod scan;
 mod thumbnail;
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -170,7 +171,11 @@ async fn search_images(
 }
 
 #[tauri::command]
-fn start_scan(root_path: String, state: State<'_, AppState>) -> Result<ScanJobStatus, String> {
+fn start_scan(
+    root_path: String,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<ScanJobStatus, String> {
     require_writable(state.inner())?;
     let setup = compute_setup_status(state.inner());
     if !setup.is_ready {
@@ -183,7 +188,7 @@ fn start_scan(root_path: String, state: State<'_, AppState>) -> Result<ScanJobSt
     let job = scan::start_or_resume_scan_job(&state.paths.db_file, &root_path)
         .map_err(|e| e.to_string())?;
     let app_state = state.inner().clone();
-    spawn_scan_worker_if_needed(app_state, job.id);
+    spawn_scan_worker_if_needed(app_state, &app_handle, job.id);
     db::get_scan_job(&state.paths.db_file, job.id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "scan job not found after start".to_string())
@@ -238,47 +243,7 @@ fn list_roots(state: State<'_, AppState>) -> Result<Vec<RootInfo>, String> {
 #[tauri::command]
 fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     let text = paths.join("\n");
-
-    // Linux: use native clipboard tools which handle persistence correctly
-    #[cfg(target_os = "linux")]
-    {
-        // wl-copy (Wayland)
-        if try_pipe_to_clipboard("wl-copy", &[], &text) {
-            return Ok(());
-        }
-        // xclip (X11)
-        if try_pipe_to_clipboard("xclip", &["-selection", "clipboard"], &text) {
-            return Ok(());
-        }
-        // xsel (X11 alternative)
-        if try_pipe_to_clipboard("xsel", &["--clipboard", "--input"], &text) {
-            return Ok(());
-        }
-    }
-
-    // macOS/Windows or Linux fallback: arboard
-    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    clipboard.set_text(&text).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn try_pipe_to_clipboard(cmd: &str, args: &[&str], text: &str) -> bool {
-    let Ok(mut child) = Command::new(cmd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        return false;
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        if stdin.write_all(text.as_bytes()).is_err() {
-            return false;
-        }
-    }
-    child.wait().is_ok_and(|s| s.success())
+    platform::clipboard::copy_to_clipboard(&text)
 }
 
 #[tauri::command]
@@ -310,7 +275,9 @@ fn compute_setup_status(app_state: &AppState) -> SetupStatus {
         required_models.clone()
     };
 
-    let instructions = if !ollama_available {
+    let python_status = platform::python::check_python_available(&app_state.paths.surya_venv_dir);
+
+    let mut instructions = if !ollama_available {
         vec![
             "Start Ollama service first.".to_string(),
             "Terminal option: run `ollama serve`".to_string(),
@@ -325,6 +292,14 @@ fn compute_setup_status(app_state: &AppState) -> SetupStatus {
         vec!["Setup complete.".to_string()]
     };
 
+    // Surya/Python is a soft requirement (OCR enrichment)
+    if !python_status.venv_exists {
+        instructions
+            .push("OCR: Python venv not found. Run setup to create Surya venv.".to_string());
+    } else if !python_status.available {
+        instructions.push("OCR: Python interpreter not working in Surya venv.".to_string());
+    }
+
     let download = app_state
         .setup_download
         .lock()
@@ -338,6 +313,9 @@ fn compute_setup_status(app_state: &AppState) -> SetupStatus {
         missing_models,
         instructions,
         download,
+        python_available: python_status.available,
+        python_version: python_status.version,
+        surya_venv_ok: python_status.venv_exists && python_status.available,
     }
 }
 
@@ -416,10 +394,22 @@ fn parse_progress_percent(line: &str) -> Option<f32> {
     number.parse::<f32>().ok().map(|v| v.clamp(0.0, 100.0))
 }
 
-fn build_scan_context(paths: &AppPaths) -> models::ScanContext {
-    let surya_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+fn resolve_surya_script(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
+    // In production builds, surya_ocr.py is bundled as a Tauri resource.
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let bundled = resource_dir.join("scripts").join("surya_ocr.py");
+        if bundled.exists() {
+            return bundled;
+        }
+    }
+    // Dev fallback: use CARGO_MANIFEST_DIR (set at compile time)
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
-        .join("surya_ocr.py");
+        .join("surya_ocr.py")
+}
+
+fn build_scan_context(paths: &AppPaths, app_handle: &tauri::AppHandle) -> models::ScanContext {
+    let surya_script = resolve_surya_script(app_handle);
     models::ScanContext {
         db_path: paths.db_file.clone(),
         thumbnails_dir: paths.thumbnails_dir.clone(),
@@ -430,7 +420,7 @@ fn build_scan_context(paths: &AppPaths) -> models::ScanContext {
     }
 }
 
-fn spawn_scan_worker_if_needed(app_state: AppState, job_id: i64) {
+fn spawn_scan_worker_if_needed(app_state: AppState, app_handle: &tauri::AppHandle, job_id: i64) {
     {
         let mut guard = app_state
             .running_scan_jobs
@@ -451,7 +441,7 @@ fn spawn_scan_worker_if_needed(app_state: AppState, job_id: i64) {
         flags.insert(job_id, cancel_flag.clone());
     }
 
-    let scan_ctx = build_scan_context(&app_state.paths);
+    let scan_ctx = build_scan_context(&app_state.paths, app_handle);
     let jobs = app_state.running_scan_jobs.clone();
     let cancel_flags = app_state.cancel_flags.clone();
     let app_state_for_task = app_state.clone();
@@ -474,8 +464,7 @@ fn spawn_scan_worker_if_needed(app_state: AppState, job_id: i64) {
                     log::warn!("WAL checkpoint after scan failed: {e}");
                 }
                 let backup_path = app_state_for_task.paths.db_dir.join("index.sqlite.bak");
-                if let Err(e) =
-                    db::backup_database(&app_state_for_task.paths.db_file, &backup_path)
+                if let Err(e) = db::backup_database(&app_state_for_task.paths.db_file, &backup_path)
                 {
                     log::warn!("Post-scan backup failed: {e}");
                 }
@@ -599,10 +588,11 @@ pub fn run() {
                 // Only handle explicit CLI-arg scanning.
                 if let Some(root_path) = std::env::args().nth(1) {
                     let state = app.state::<AppState>();
+                    let handle = app.handle().clone();
                     if let Ok(job) =
                         scan::start_or_resume_scan_job(&state.paths.db_file, &root_path)
                     {
-                        spawn_scan_worker_if_needed(state.inner().clone(), job.id);
+                        spawn_scan_worker_if_needed(state.inner().clone(), &handle, job.id);
                     }
                 }
             }
