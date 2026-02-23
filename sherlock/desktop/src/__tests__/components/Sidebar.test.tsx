@@ -18,6 +18,7 @@ const defaultProps = {
   activeSmartFolderId: null,
   onSelectRoot: vi.fn(),
   onDeleteRoot: vi.fn(),
+  onRescanRoot: vi.fn(),
   onPickAndScan: vi.fn(),
   onCancelScan: vi.fn(),
   onResumeScan: vi.fn(),
@@ -72,9 +73,10 @@ describe("Sidebar", () => {
     expect(screen.queryByLabelText("Remove photos")).not.toBeInTheDocument();
   });
 
-  it("renders running scan progress", () => {
+  it("renders running scan progress with folder name and ETA only", () => {
     render(<Sidebar {...defaultProps} activeScans={[mockRunningScan]} />);
-    expect(screen.getByText(/photos:.*50.*\/.*100/)).toBeInTheDocument();
+    expect(screen.getByText("photos")).toBeInTheDocument();
+    expect(screen.queryByText(/50.*\/.*100/)).not.toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
@@ -82,5 +84,38 @@ describe("Sidebar", () => {
     const interruptedScan = { ...mockRunningScan, id: 11, status: "interrupted" as const };
     render(<Sidebar {...defaultProps} activeScans={[interruptedScan]} />);
     expect(screen.getByText("Resume")).toBeInTheDocument();
+  });
+
+  it("shows context menu on right-click of root card", async () => {
+    render(<Sidebar {...defaultProps} roots={[sampleRoot]} />);
+    const card = screen.getByText("photos").closest(".root-card")!;
+    await userEvent.pointer({ keys: "[MouseRight]", target: card });
+    expect(screen.getByRole("menuitem", { name: "Rescan" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("calls onRescanRoot from context menu", async () => {
+    const onRescanRoot = vi.fn();
+    render(<Sidebar {...defaultProps} roots={[sampleRoot]} onRescanRoot={onRescanRoot} />);
+    const card = screen.getByText("photos").closest(".root-card")!;
+    await userEvent.pointer({ keys: "[MouseRight]", target: card });
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rescan" }));
+    expect(onRescanRoot).toHaveBeenCalledWith(sampleRoot);
+  });
+
+  it("closes context menu on Escape", async () => {
+    render(<Sidebar {...defaultProps} roots={[sampleRoot]} />);
+    const card = screen.getByText("photos").closest(".root-card")!;
+    await userEvent.pointer({ keys: "[MouseRight]", target: card });
+    expect(screen.getByRole("menuitem", { name: "Rescan" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menuitem", { name: "Rescan" })).not.toBeInTheDocument();
+  });
+
+  it("does not show context menu in readOnly mode", async () => {
+    render(<Sidebar {...defaultProps} roots={[sampleRoot]} readOnly />);
+    const card = screen.getByText("photos").closest(".root-card")!;
+    await userEvent.pointer({ keys: "[MouseRight]", target: card });
+    expect(screen.queryByRole("menuitem", { name: "Rescan" })).not.toBeInTheDocument();
   });
 });

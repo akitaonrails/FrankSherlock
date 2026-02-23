@@ -7,7 +7,7 @@ import { mockRoot as sampleRoot, mockRunningScan } from "../fixtures";
 describe("RootCard", () => {
   it("renders root name and file count", () => {
     render(
-      <RootCard root={sampleRoot} isSelected={false} scan={undefined} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} />
+      <RootCard root={sampleRoot} isSelected={false} scan={undefined} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} onRescan={vi.fn()} />
     );
     expect(screen.getByText("photos")).toBeInTheDocument();
     expect(screen.getByText("42 files")).toBeInTheDocument();
@@ -15,7 +15,7 @@ describe("RootCard", () => {
 
   it("applies selected class when selected", () => {
     const { container } = render(
-      <RootCard root={sampleRoot} isSelected scan={undefined} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} />
+      <RootCard root={sampleRoot} isSelected scan={undefined} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} onRescan={vi.fn()} />
     );
     expect(container.querySelector(".root-card.selected")).not.toBeNull();
   });
@@ -40,14 +40,14 @@ describe("RootCard", () => {
 
   it("hides delete button in readOnly mode", () => {
     render(
-      <RootCard root={sampleRoot} isSelected={false} scan={undefined} readOnly onSelect={vi.fn()} onDelete={vi.fn()} />
+      <RootCard root={sampleRoot} isSelected={false} scan={undefined} readOnly onSelect={vi.fn()} onDelete={vi.fn()} onRescan={vi.fn()} />
     );
     expect(screen.queryByLabelText("Remove photos")).not.toBeInTheDocument();
   });
 
   it("shows scan progress when scan is active", () => {
     render(
-      <RootCard root={sampleRoot} isSelected={false} scan={mockRunningScan} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} />
+      <RootCard root={sampleRoot} isSelected={false} scan={mockRunningScan} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} onRescan={vi.fn()} />
     );
     expect(screen.getByText("50/100")).toBeInTheDocument();
   });

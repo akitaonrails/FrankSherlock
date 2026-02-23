@@ -35,7 +35,7 @@ function ScanProgress({ scan, readOnly, onCancel, onResume }: ScanProgressProps)
   if (scan.status === "interrupted") {
     return (
       <div className="sidebar-scan-progress">
-        <div>Interrupted: {basename(scan.rootPath)} at {scan.processedFiles} / {scan.totalFiles}</div>
+        <div>Interrupted: {basename(scan.rootPath)}</div>
         {!readOnly && onResume && <button type="button" onClick={onResume}>Resume</button>}
       </div>
     );
@@ -49,7 +49,7 @@ function ScanProgress({ scan, readOnly, onCancel, onResume }: ScanProgressProps)
   return (
     <div className="sidebar-scan-progress">
       <div className="sidebar-scan-progress-header">
-        {basename(scan.rootPath)}: {scan.processedFiles} / {scan.totalFiles}
+        {basename(scan.rootPath)}
         {eta && <span className="sidebar-scan-eta"> — {eta} remaining</span>}
       </div>
       <progress value={pct} max={100} />

@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { RootInfo, ScanJobStatus } from "../../types";
 
 type RootCardProps = {
@@ -7,17 +8,66 @@ type RootCardProps = {
   readOnly: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  onRescan: () => void;
 };
 
-export default function RootCard({ root, isSelected, scan, readOnly, onSelect, onDelete }: RootCardProps) {
+export default function RootCard({ root, isSelected, scan, readOnly, onSelect, onDelete, onRescan }: RootCardProps) {
+  const [showMenu, setShowMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const closeMenu = useCallback(() => setShowMenu(false), []);
+
   const progress = scan?.totalFiles
     ? Math.min(100, (scan.processedFiles / Math.max(1, scan.totalFiles)) * 100)
     : 0;
+
+  function handleContextMenu(e: React.MouseEvent) {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuPos({ x: e.clientX, y: e.clientY });
+    setShowMenu(true);
+  }
+
+  // Viewport clamping
+  useEffect(() => {
+    if (!showMenu) return;
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      el.style.left = `${window.innerWidth - rect.width - 4}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      el.style.top = `${window.innerHeight - rect.height - 4}px`;
+    }
+  }, [showMenu, menuPos]);
+
+  // Click-away and Escape dismiss
+  useEffect(() => {
+    if (!showMenu) return;
+    function handleMouseDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        closeMenu();
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeMenu();
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showMenu, closeMenu]);
 
   return (
     <div
       className={`root-card${isSelected ? " selected" : ""}`}
       onClick={onSelect}
+      onContextMenu={handleContextMenu}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -53,6 +103,17 @@ export default function RootCard({ root, isSelected, scan, readOnly, onSelect, o
         <div className="root-card-scan">
           <progress value={progress} max={100} />
           <span>{scan.processedFiles}/{scan.totalFiles}</span>
+        </div>
+      )}
+      {showMenu && (
+        <div
+          ref={menuRef}
+          className="root-card-context-menu"
+          style={{ left: menuPos.x, top: menuPos.y }}
+          role="menu"
+        >
+          <button role="menuitem" onClick={(e) => { e.stopPropagation(); onRescan(); setShowMenu(false); }}>Rescan</button>
+          <button role="menuitem" className="danger" onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}>Remove</button>
         </div>
       )}
     </div>

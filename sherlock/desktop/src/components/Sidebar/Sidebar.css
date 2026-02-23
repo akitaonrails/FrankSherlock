@@ -261,3 +261,36 @@
   color: var(--text-secondary);
   font-size: 0.75rem;
 }
+
+/* ── Root card context menu ────────────────────────────── */
+.root-card-context-menu {
+  position: fixed;
+  z-index: 1100;
+  min-width: 140px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+}
+
+.root-card-context-menu button {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  width: 100%;
+  font: inherit;
+}
+
+.root-card-context-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.root-card-context-menu button.danger {
+  color: var(--danger);
+}

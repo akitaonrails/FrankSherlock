@@ -186,6 +186,25 @@ export function useScanManager(cb: ScanManagerCallbacks) {
     }
   }
 
+  async function onRescanRoot(root: RootInfo, setup: SetupStatus | null, readOnly: boolean) {
+    if (readOnly) return;
+    if (setup && !setup.isReady) {
+      cb.setError("Setup is incomplete. Finish Ollama setup before starting scans.");
+      return;
+    }
+    try {
+      setCompletedJobs([]);
+      const job = await startScan(root.rootPath);
+      setTrackedJobIds((prev) => [...prev, job.id]);
+      lastProcessedRef.current = 0;
+      cb.setNotice(`Rescan started for ${root.rootName}`);
+      await refreshRoots();
+      await pollRuntimeAndScans();
+    } catch (err) {
+      cb.setError(errorMessage(err));
+    }
+  }
+
   async function onCancelScan(scan: ScanJobStatus, readOnly: boolean) {
     if (readOnly) return;
     try {
@@ -263,6 +282,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
     pollRuntimeAndScans,
     initApp,
     onPickAndScan,
+    onRescanRoot,
     onCancelScan,
     onResumeScan,
     onResumeAllInterrupted,

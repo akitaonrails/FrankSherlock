@@ -659,6 +659,7 @@ export default function App() {
           activeSmartFolderId={activeSmartFolderId}
           onSelectRoot={setSelectedRootId}
           onDeleteRoot={(root) => setConfirmDeleteRoot(root)}
+          onRescanRoot={(root) => scanManager.onRescanRoot(root, setup, readOnly)}
           onPickAndScan={() => scanManager.onPickAndScan(setup, readOnly)}
           onCancelScan={(scan) => scanManager.onCancelScan(scan, readOnly)}
           onResumeScan={(scan) => scanManager.onResumeScan(scan, readOnly)}

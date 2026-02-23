@@ -20,6 +20,7 @@ type SidebarProps = {
   onSelectRoot: (rootId: number | null) => void;
   onDeleteRoot: (root: RootInfo) => void;
   onPickAndScan: () => void;
+  onRescanRoot: (root: RootInfo) => void;
   onCancelScan: (scan: ScanJobStatus) => void;
   onResumeScan: (scan: ScanJobStatus) => void;
   onSelectAlbum: (album: Album) => void;
@@ -31,7 +32,7 @@ type SidebarProps = {
 export default function Sidebar({
   roots, selectedRootId, activeScans, dbStats, readOnly,
   setupReady, albums, smartFolders, activeAlbumName, activeSmartFolderId,
-  onSelectRoot, onDeleteRoot, onPickAndScan,
+  onSelectRoot, onDeleteRoot, onRescanRoot, onPickAndScan,
   onCancelScan, onResumeScan,
   onSelectAlbum, onDeleteAlbum, onSelectSmartFolder, onDeleteSmartFolder,
 }: SidebarProps) {
@@ -72,6 +73,7 @@ export default function Sidebar({
               readOnly={readOnly}
               onSelect={() => onSelectRoot(selectedRootId === root.id ? null : root.id)}
               onDelete={() => onDeleteRoot(root)}
+              onRescan={() => onRescanRoot(root)}
             />
           ))}
         </div>
