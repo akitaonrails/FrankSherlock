@@ -53,19 +53,19 @@ describe("RootCard", () => {
     expect(screen.getByText(/\+10 new, 5 mod, 2 moved/)).toBeInTheDocument();
   });
 
-  it("shows cancel button for running scan", () => {
+  it("shows pause button for running scan", () => {
     const onCancelScan = vi.fn();
     render(
       <RootCard root={sampleRoot} isSelected={false} scan={mockRunningScan} readOnly={false} onSelect={vi.fn()} onDelete={vi.fn()} onRescan={vi.fn()} onCancelScan={onCancelScan} />
     );
-    expect(screen.getByText("Cancel")).toBeInTheDocument();
+    expect(screen.getByText("Pause")).toBeInTheDocument();
   });
 
-  it("hides cancel button in readOnly mode", () => {
+  it("hides pause button in readOnly mode", () => {
     render(
       <RootCard root={sampleRoot} isSelected={false} scan={mockRunningScan} readOnly onSelect={vi.fn()} onDelete={vi.fn()} onRescan={vi.fn()} onCancelScan={vi.fn()} />
     );
-    expect(screen.queryByText("Cancel")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pause")).not.toBeInTheDocument();
   });
 
   it("shows resume button for interrupted scan", () => {

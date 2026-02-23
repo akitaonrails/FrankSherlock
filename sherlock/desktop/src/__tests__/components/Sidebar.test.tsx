@@ -76,10 +76,10 @@ describe("Sidebar", () => {
     expect(screen.queryByLabelText("Remove photos")).not.toBeInTheDocument();
   });
 
-  it("renders running scan with cancel button inside RootCard", () => {
+  it("renders running scan with pause button inside RootCard", () => {
     render(<Sidebar {...defaultProps} roots={[sampleRoot]} activeScans={[mockRunningScan]} />);
     expect(screen.getByText("50/100")).toBeInTheDocument();
-    expect(screen.getByText("Cancel")).toBeInTheDocument();
+    expect(screen.getByText("Pause")).toBeInTheDocument();
   });
 
   it("renders interrupted scan with resume button inside RootCard", () => {

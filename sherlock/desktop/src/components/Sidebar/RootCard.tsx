@@ -113,7 +113,7 @@ export default function RootCard({ root, isSelected, scan, readOnly, onSelect, o
             +{scan.added} new, {scan.modified} mod, {scan.moved} moved
           </div>
           {!readOnly && onCancelScan && (
-            <button type="button" className="root-card-scan-btn" onClick={(e) => { e.stopPropagation(); onCancelScan(); }}>Cancel</button>
+            <button type="button" className="root-card-scan-btn" onClick={(e) => { e.stopPropagation(); onCancelScan(); }}>Pause</button>
           )}
         </div>
       )}
