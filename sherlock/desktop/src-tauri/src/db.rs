@@ -216,7 +216,10 @@ pub fn create_or_resume_scan_job(db_path: &Path, root_path: &str) -> AppResult<S
     if let Some(job_id) = maybe_job_id {
         tx.execute(
             "UPDATE scan_jobs
-             SET status = 'running', error_text = NULL, updated_at = ?2
+             SET status = 'running', error_text = NULL,
+                 cursor_rel_path = NULL, processed_files = 0,
+                 added = 0, modified = 0, moved = 0, unchanged = 0,
+                 updated_at = ?2
              WHERE id = ?1",
             params![job_id, now],
         )?;

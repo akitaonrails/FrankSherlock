@@ -549,9 +549,8 @@ pub fn run() {
         })
         .setup(move |app| {
             if !app_state.read_only {
-                for job in db::list_resumable_scan_jobs(&app_state.paths.db_file)? {
-                    spawn_scan_worker_if_needed(app_state.clone(), job.id);
-                }
+                // Don't auto-resume interrupted scans — let the frontend prompt the user.
+                // Only handle explicit CLI-arg scanning.
                 if let Some(root_path) = std::env::args().nth(1) {
                     let state = app.state::<AppState>();
                     if let Ok(job) =

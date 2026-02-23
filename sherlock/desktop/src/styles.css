@@ -805,6 +805,35 @@ select:disabled {
   cursor: not-allowed;
 }
 
+/* ── Resume modal ─────────────────────────────────────────── */
+.resume-modal {
+  width: min(480px, 90%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+.resume-modal h2 { margin: 0 0 8px; font-size: 1rem; }
+.resume-modal p { margin: 0 0 10px; color: var(--text-secondary); font-size: var(--font-size-sm); }
+.resume-scan-list {
+  margin: 0 0 12px; padding-left: 20px;
+  font-size: var(--font-size-sm); color: var(--text-primary);
+}
+.resume-scan-list li { margin-bottom: 4px; }
+.resume-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.resume-actions button {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 6px 14px;
+  font: inherit; font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.resume-actions button:hover { border-color: var(--border-focus); }
+
 /* ── Preview modal ────────────────────────────────────────── */
 .preview-overlay {
   cursor: pointer;

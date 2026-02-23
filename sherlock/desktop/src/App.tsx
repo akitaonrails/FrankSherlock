@@ -56,6 +56,7 @@ export default function App() {
   const [selectedRootId, setSelectedRootId] = useState<number | null>(null);
   const [confirmDeleteRoot, setConfirmDeleteRoot] = useState<RootInfo | null>(null);
   const [readOnly, setReadOnly] = useState(false);
+  const [showResumeModal, setShowResumeModal] = useState(false);
   const requestIdRef = useRef(0);
   const configRef = useRef<Record<string, unknown>>({});
   const lastProcessedRef = useRef(0);
@@ -153,6 +154,10 @@ export default function App() {
         if (scans.length > 0) {
           setTrackedJobId(scans[0].id);
         }
+        const interrupted = scans.filter((s) => s.status === "interrupted");
+        if (interrupted.length > 0) {
+          setShowResumeModal(true);
+        }
       } catch (err) {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -182,7 +187,9 @@ export default function App() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (confirmDeleteRoot) {
+        if (showResumeModal) {
+          setShowResumeModal(false);
+        } else if (confirmDeleteRoot) {
           setConfirmDeleteRoot(null);
         } else if (previewItem) {
           setPreviewItem(null);
@@ -191,7 +198,7 @@ export default function App() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previewItem, confirmDeleteRoot]);
+  }, [previewItem, confirmDeleteRoot, showResumeModal]);
 
   // Auto-dismiss toasts
   useEffect(() => {
@@ -333,6 +340,21 @@ export default function App() {
     }
   }
 
+  async function onResumeAllInterrupted() {
+    setShowResumeModal(false);
+    for (const scan of activeScans.filter((s) => s.status === "interrupted")) {
+      try {
+        const job = await startScan(scan.rootPath);
+        setTrackedJobId(job.id);
+        setLatestJob(job);
+        lastProcessedRef.current = 0;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+    await pollRuntimeAndScans();
+  }
+
   async function onDeleteRoot(root: RootInfo) {
     if (readOnly) return;
     setConfirmDeleteRoot(null);
@@ -436,6 +458,30 @@ export default function App() {
               >
                 {setup.download.status === "running" ? "Downloading..." : "Download model"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Resume Interrupted Scans Modal ── */}
+      {showResumeModal && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="resume-modal">
+            <h2>Interrupted Scans</h2>
+            <p>The following scans were interrupted and can be resumed:</p>
+            <ul className="resume-scan-list">
+              {activeScans
+                .filter((s) => s.status === "interrupted")
+                .map((scan) => (
+                  <li key={scan.id}>
+                    <strong>{scan.rootPath.split("/").pop()}</strong>
+                    <span> — {scan.processedFiles}/{scan.totalFiles} files processed</span>
+                  </li>
+                ))}
+            </ul>
+            <div className="resume-actions">
+              <button type="button" onClick={() => setShowResumeModal(false)}>Later</button>
+              <button type="button" onClick={onResumeAllInterrupted}>Resume Now</button>
             </div>
           </div>
         </div>
