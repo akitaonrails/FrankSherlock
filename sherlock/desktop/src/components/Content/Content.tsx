@@ -29,6 +29,7 @@ type ContentProps = {
   sentinelRef: RefObject<HTMLDivElement>;
   onTileClick: (idx: number, e: React.MouseEvent) => void;
   onTileDoubleClick: (idx: number) => void;
+  onTileContextMenu: (idx: number, e: React.MouseEvent) => void;
 };
 
 export default function Content({
@@ -36,6 +37,7 @@ export default function Content({
   sortBy, onSortByChange, sortOrder, onSortOrderChange, hasTextQuery,
   items, total, loading, loadingMore, canLoadMore, isScanning, selectedRootName,
   selectedIndices, focusIndex, gridRef, sentinelRef, onTileClick, onTileDoubleClick,
+  onTileContextMenu,
 }: ContentProps) {
   return (
     <div className="content">
@@ -68,6 +70,7 @@ export default function Content({
           gridRef={gridRef}
           onTileClick={onTileClick}
           onTileDoubleClick={onTileDoubleClick}
+          onTileContextMenu={onTileContextMenu}
         />
 
         {canLoadMore && (

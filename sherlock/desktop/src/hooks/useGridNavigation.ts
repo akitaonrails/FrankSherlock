@@ -16,6 +16,7 @@ type GridNavParams = {
   showHelp: boolean;
   setup: SetupStatus | null;
   canLoadMore: boolean;
+  hasModalOpen: boolean;
   selectOnly: (idx: number) => void;
   rangeSelect: (from: number, to: number) => void;
   selectAll: (count: number) => void;
@@ -27,6 +28,8 @@ type GridNavParams = {
   setShowHelp: (show: boolean) => void;
   setNotice: (msg: string) => void;
   onLoadMore: () => void;
+  onRequestDelete: () => void;
+  onRequestRename: () => void;
 };
 
 export function useGridNavigation(p: GridNavParams) {
@@ -58,7 +61,19 @@ export function useGridNavigation(p: GridNavParams) {
         return;
       }
 
-      if (p.showResumeModal || p.confirmDeleteRoot || p.showHelp || (p.setup && !p.setup.isReady)) return;
+      if (p.showResumeModal || p.confirmDeleteRoot || p.showHelp || p.hasModalOpen || (p.setup && !p.setup.isReady)) return;
+
+      if (e.key === "Delete") {
+        e.preventDefault();
+        if (p.selectedIndices.size > 0) p.onRequestDelete();
+        return;
+      }
+
+      if (e.key === "F2") {
+        e.preventDefault();
+        if (p.selectedIndices.size === 1) p.onRequestRename();
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         e.preventDefault();
@@ -134,6 +149,6 @@ export function useGridNavigation(p: GridNavParams) {
   }, [
     p.focusIndex, p.anchorIndex, p.selectedIndices, p.previewOpen,
     p.items.length, p.showSummary, p.showResumeModal, p.confirmDeleteRoot,
-    p.showHelp, p.setup?.isReady, p.canLoadMore,
+    p.showHelp, p.hasModalOpen, p.setup?.isReady, p.canLoadMore,
   ]);
 }

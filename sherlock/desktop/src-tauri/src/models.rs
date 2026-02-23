@@ -273,3 +273,26 @@ pub enum HealthCheckOutcome {
     RestoredFromBackup,
     Recreated,
 }
+
+/// Internal struct for filesystem cleanup after DB deletion — not serialized to frontend.
+#[derive(Debug, Clone)]
+pub struct DeletedFileInfo {
+    pub abs_path: String,
+    pub thumb_path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteFilesResult {
+    pub deleted_count: u64,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameFileResult {
+    pub file_id: i64,
+    pub new_rel_path: String,
+    pub new_abs_path: String,
+    pub new_filename: String,
+}

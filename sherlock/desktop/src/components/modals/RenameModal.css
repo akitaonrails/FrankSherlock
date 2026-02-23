@@ -1,0 +1,28 @@
+/* ── Rename modal ─────────────────────────────────────────── */
+.rename-modal {
+  width: min(400px, 90%);
+}
+
+.rename-modal input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.rename-modal input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+.rename-error {
+  color: var(--danger);
+  font-size: 0.75rem;
+  margin: -4px 0 8px;
+}

@@ -18,8 +18,9 @@ use std::sync::{Arc, Mutex};
 use config::{prepare_dirs, resolve_paths, AppPaths};
 use error::{AppError, AppResult};
 use models::{
-    CleanupResult, HealthCheckOutcome, HealthStatus, PurgeResult, RootInfo, RuntimeStatus,
-    ScanJobStatus, SearchRequest, SearchResponse, SetupDownloadStatus, SetupStatus,
+    CleanupResult, DeleteFilesResult, HealthCheckOutcome, HealthStatus, PurgeResult,
+    RenameFileResult, RootInfo, RuntimeStatus, ScanJobStatus, SearchRequest, SearchResponse,
+    SetupDownloadStatus, SetupStatus,
 };
 use tauri::Manager;
 use tauri::State;
@@ -244,6 +245,83 @@ fn list_roots(state: State<'_, AppState>) -> Result<Vec<RootInfo>, String> {
 fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     let text = paths.join("\n");
     platform::clipboard::copy_to_clipboard(&text)
+}
+
+#[tauri::command]
+fn delete_files(file_ids: Vec<i64>, state: State<'_, AppState>) -> Result<DeleteFilesResult, String> {
+    require_writable(state.inner())?;
+    let deleted_infos =
+        db::delete_files_by_id(&state.paths.db_file, &file_ids).map_err(|e| e.to_string())?;
+
+    let mut deleted_count = 0u64;
+    let mut errors = Vec::new();
+
+    for info in &deleted_infos {
+        match std::fs::remove_file(&info.abs_path) {
+            Ok(()) => deleted_count += 1,
+            Err(e) => {
+                deleted_count += 1; // DB record is already gone
+                errors.push(format!("{}: {e}", info.abs_path));
+            }
+        }
+        if let Some(tp) = &info.thumb_path {
+            let _ = std::fs::remove_file(tp);
+        }
+    }
+
+    Ok(DeleteFilesResult {
+        deleted_count,
+        errors,
+    })
+}
+
+#[tauri::command]
+fn rename_file(
+    file_id: i64,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<RenameFileResult, String> {
+    require_writable(state.inner())?;
+
+    // Validate new_name
+    let new_name = new_name.trim().to_string();
+    if new_name.is_empty() {
+        return Err("Filename cannot be empty".to_string());
+    }
+    if new_name.contains('/') || new_name.contains('\\') {
+        return Err("Filename cannot contain path separators".to_string());
+    }
+
+    let (old_abs, old_rel, _thumb) =
+        db::get_file_path_info(&state.paths.db_file, file_id).map_err(|e| e.to_string())?;
+
+    // Compute new paths by replacing the filename component
+    let old_abs_path = std::path::Path::new(&old_abs);
+    let new_abs_path = old_abs_path
+        .parent()
+        .map(|p| p.join(&new_name))
+        .ok_or_else(|| "Cannot determine parent directory".to_string())?;
+    let new_abs_str = new_abs_path.to_string_lossy().to_string();
+
+    let new_rel = if let Some(idx) = old_rel.rfind('/') {
+        format!("{}/{}", &old_rel[..idx], new_name)
+    } else {
+        new_name.clone()
+    };
+
+    // Rename on disk first
+    std::fs::rename(&old_abs, &new_abs_path).map_err(|e| format!("Rename failed: {e}"))?;
+
+    // Update DB
+    db::rename_file_record(&state.paths.db_file, file_id, &new_rel, &new_abs_str, &new_name)
+        .map_err(|e| e.to_string())?;
+
+    Ok(RenameFileResult {
+        file_id,
+        new_rel_path: new_rel,
+        new_abs_path: new_abs_str,
+        new_filename: new_name,
+    })
 }
 
 #[tauri::command]
@@ -616,7 +694,9 @@ pub fn run() {
             list_roots,
             load_user_config,
             save_user_config,
-            copy_files_to_clipboard
+            copy_files_to_clipboard,
+            delete_files,
+            rename_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

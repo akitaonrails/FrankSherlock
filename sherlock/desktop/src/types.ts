@@ -130,3 +130,15 @@ export type RootInfo = {
   lastScanAt: number | null;
   fileCount: number;
 };
+
+export type DeleteFilesResult = {
+  deletedCount: number;
+  errors: string[];
+};
+
+export type RenameFileResult = {
+  fileId: number;
+  newRelPath: string;
+  newAbsPath: string;
+  newFilename: string;
+};

@@ -835,6 +835,75 @@ pub fn validate_and_purge_stale_roots(
 }
 
 // ---------------------------------------------------------------------------
+// File delete / rename
+// ---------------------------------------------------------------------------
+
+pub fn get_file_path_info(
+    db_path: &Path,
+    file_id: i64,
+) -> AppResult<(String, String, Option<String>)> {
+    let conn = open_conn(db_path)?;
+    conn.query_row(
+        "SELECT abs_path, rel_path, thumb_path FROM files WHERE id = ?1 AND deleted_at IS NULL",
+        params![file_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )
+    .map_err(AppError::from)
+}
+
+pub fn delete_files_by_id(
+    db_path: &Path,
+    file_ids: &[i64],
+) -> AppResult<Vec<crate::models::DeletedFileInfo>> {
+    use crate::models::DeletedFileInfo;
+
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+    let mut deleted = Vec::new();
+
+    for &fid in file_ids {
+        let info: Option<(String, Option<String>)> = tx
+            .query_row(
+                "SELECT abs_path, thumb_path FROM files WHERE id = ?1 AND deleted_at IS NULL",
+                params![fid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+
+        if let Some((abs_path, thumb_path)) = info {
+            tx.execute("DELETE FROM files_fts WHERE rowid = ?1", params![fid])?;
+            tx.execute("DELETE FROM files WHERE id = ?1", params![fid])?;
+            deleted.push(DeletedFileInfo {
+                abs_path,
+                thumb_path,
+            });
+        }
+    }
+
+    tx.commit()?;
+    Ok(deleted)
+}
+
+pub fn rename_file_record(
+    db_path: &Path,
+    file_id: i64,
+    new_rel_path: &str,
+    new_abs_path: &str,
+    new_filename: &str,
+) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+    let now = now_epoch_secs();
+    tx.execute(
+        "UPDATE files SET rel_path = ?2, abs_path = ?3, filename = ?4, updated_at = ?5 WHERE id = ?1",
+        params![file_id, new_rel_path, new_abs_path, new_filename, now],
+    )?;
+    refresh_fts(&tx, file_id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
 
@@ -1907,5 +1976,95 @@ mod tests {
         let res = search_images(&db_path, &req).expect("search");
         assert!(res.total >= 1);
         assert_eq!(res.items[0].rel_path, "alpha.jpg");
+    }
+
+    // -----------------------------------------------------------------------
+    // File delete / rename tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_delete_files_by_id() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        let id1 = upsert_file_record(&db_path, &sample_record(root_id, "a.jpg", "fp-a"))
+            .expect("upsert");
+        let id2 = upsert_file_record(&db_path, &sample_record(root_id, "b.jpg", "fp-b"))
+            .expect("upsert");
+        let _id3 = upsert_file_record(&db_path, &sample_record(root_id, "c.jpg", "fp-c"))
+            .expect("upsert");
+
+        let deleted = delete_files_by_id(&db_path, &[id1, id2]).expect("delete");
+        assert_eq!(deleted.len(), 2);
+
+        // Verify files are gone from DB
+        let stats = database_stats(&db_path).expect("stats");
+        assert_eq!(stats.files, 1);
+
+        // Verify FTS entries are cleaned up
+        let conn = open_conn(&db_path).expect("open");
+        let fts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0))
+            .expect("fts count");
+        assert_eq!(fts_count, 1);
+    }
+
+    #[test]
+    fn test_delete_files_by_id_nonexistent() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let deleted = delete_files_by_id(&db_path, &[999, 1000]).expect("delete");
+        assert_eq!(deleted.len(), 0);
+    }
+
+    #[test]
+    fn test_get_file_path_info() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+        let file_id = upsert_file_record(&db_path, &sample_record(root_id, "info.jpg", "fp-info"))
+            .expect("upsert");
+
+        let (abs_path, rel_path, thumb_path) =
+            get_file_path_info(&db_path, file_id).expect("info");
+        assert_eq!(abs_path, "/tmp/demo/info.jpg");
+        assert_eq!(rel_path, "info.jpg");
+        assert!(thumb_path.is_none());
+    }
+
+    #[test]
+    fn test_rename_file_record() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+        let file_id = upsert_file_record(
+            &db_path,
+            &sample_record(root_id, "old_name.jpg", "fp-rename"),
+        )
+        .expect("upsert");
+
+        rename_file_record(
+            &db_path,
+            file_id,
+            "new_name.jpg",
+            "/tmp/demo/new_name.jpg",
+            "new_name.jpg",
+        )
+        .expect("rename");
+
+        // Verify DB update
+        let (abs_path, rel_path, _) = get_file_path_info(&db_path, file_id).expect("info");
+        assert_eq!(rel_path, "new_name.jpg");
+        assert_eq!(abs_path, "/tmp/demo/new_name.jpg");
+
+        // Verify FTS is updated (search by new name should work)
+        let req = SearchRequest {
+            query: "new_name".to_string(),
+            ..SearchRequest::default()
+        };
+        let res = search_images(&db_path, &req).expect("search");
+        assert_eq!(res.total, 1);
+        assert_eq!(res.items[0].rel_path, "new_name.jpg");
     }
 }

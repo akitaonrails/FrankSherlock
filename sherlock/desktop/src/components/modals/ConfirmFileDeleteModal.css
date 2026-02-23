@@ -1,0 +1,37 @@
+/* ── Confirm file delete modal ────────────────────────────── */
+.confirm-file-delete-modal {
+  width: min(420px, 90%);
+}
+
+.confirm-file-delete-modal p {
+  line-height: 1.4;
+}
+
+.file-delete-list {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border-primary);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 0 0 10px;
+}
+
+.file-delete-list div {
+  padding: 1px 0;
+  word-break: break-all;
+}
+
+.file-delete-more {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 0.75rem;
+}
+
+.file-delete-warning {
+  color: var(--danger);
+  font-weight: 500;
+}

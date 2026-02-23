@@ -9,9 +9,10 @@ type Props = {
   isFocused: boolean;
   onClick: (index: number, e: React.MouseEvent) => void;
   onDoubleClick: (index: number) => void;
+  onContextMenu: (index: number, e: React.MouseEvent) => void;
 };
 
-export default function ImageTile({ item, index, isSelected, isFocused, onClick, onDoubleClick }: Props) {
+export default function ImageTile({ item, index, isSelected, isFocused, onClick, onDoubleClick, onContextMenu }: Props) {
   const thumb = item.thumbnailPath ? convertFileSrc(item.thumbnailPath) : null;
 
   return (
@@ -20,6 +21,7 @@ export default function ImageTile({ item, index, isSelected, isFocused, onClick,
       role="listitem"
       onClick={(e) => onClick(index, e)}
       onDoubleClick={() => onDoubleClick(index)}
+      onContextMenu={(e) => onContextMenu(index, e)}
     >
       <div className="tile-thumb">
         {thumb ? (

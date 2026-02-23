@@ -9,10 +9,11 @@ type ImageGridProps = {
   gridRef: RefObject<HTMLDivElement>;
   onTileClick: (idx: number, e: React.MouseEvent) => void;
   onTileDoubleClick: (idx: number) => void;
+  onTileContextMenu: (idx: number, e: React.MouseEvent) => void;
 };
 
 export default function ImageGrid({
-  items, selectedIndices, focusIndex, gridRef, onTileClick, onTileDoubleClick,
+  items, selectedIndices, focusIndex, gridRef, onTileClick, onTileDoubleClick, onTileContextMenu,
 }: ImageGridProps) {
   return (
     <div className="grid" role="list" ref={gridRef}>
@@ -25,6 +26,7 @@ export default function ImageGrid({
           isFocused={focusIndex === idx}
           onClick={onTileClick}
           onDoubleClick={onTileDoubleClick}
+          onContextMenu={onTileContextMenu}
         />
       ))}
     </div>

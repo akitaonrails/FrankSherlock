@@ -3,8 +3,10 @@ import type {
   AppPaths,
   CleanupResult,
   DbStats,
+  DeleteFilesResult,
   HealthStatus,
   PurgeResult,
+  RenameFileResult,
   RootInfo,
   RuntimeStatus,
   ScanJobStatus,
@@ -80,4 +82,12 @@ export async function saveUserConfig(config: Record<string, unknown>): Promise<v
 
 export async function copyFilesToClipboard(paths: string[]): Promise<void> {
   return invoke<void>("copy_files_to_clipboard", { paths });
+}
+
+export async function deleteFiles(fileIds: number[]): Promise<DeleteFilesResult> {
+  return invoke<DeleteFilesResult>("delete_files", { fileIds });
+}
+
+export async function renameFile(fileId: number, newName: string): Promise<RenameFileResult> {
+  return invoke<RenameFileResult>("rename_file", { fileId, newName });
 }
