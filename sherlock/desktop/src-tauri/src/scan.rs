@@ -18,8 +18,8 @@ use crate::models::{
 use crate::platform::paths::normalize_rel_path;
 use crate::thumbnail;
 
-const IMAGE_EXTS: [&str; 8] = [
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif",
+const SUPPORTED_EXTS: [&str; 9] = [
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif", ".pdf",
 ];
 
 /// File classification state determined during incremental discovery.
@@ -166,11 +166,17 @@ fn run_scan_job_internal(
                         )?;
 
                         // Regenerate thumbnail at new path if old one existed
-                        let thumb = thumbnail::generate_thumbnail(
-                            Path::new(&probe.abs_path),
-                            &ctx.thumbnails_dir,
-                            &probe.rel_path,
-                        );
+                        let abs = Path::new(&probe.abs_path);
+                        let thumb = if is_pdf_file(abs) {
+                            thumbnail::generate_pdf_thumbnail(
+                                abs,
+                                &ctx.thumbnails_dir,
+                                &probe.rel_path,
+                                &ctx.pdfium_lib_path,
+                            )
+                        } else {
+                            thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path)
+                        };
                         if let Some(ref t) = thumb {
                             db::update_file_thumb_path(db_path, job.root_id, &probe.rel_path, t)?;
                         }
@@ -262,24 +268,54 @@ struct ClassifyAndThumbResult {
     location_text: String,
 }
 
+fn is_pdf_file(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
 fn classify_and_thumbnail(
     ctx: &ScanContext,
     probe: &FileProbe,
     _root_id: i64,
 ) -> ClassifyAndThumbResult {
     let abs = Path::new(&probe.abs_path);
+    let is_pdf = is_pdf_file(abs);
 
-    let classification = classify::classify_image(
-        abs,
-        &ctx.model,
-        &ctx.tmp_dir,
-        &ctx.surya_venv_dir,
-        &ctx.surya_script,
-    );
+    let classification = if is_pdf {
+        classify::classify_pdf(
+            abs,
+            &ctx.model,
+            &ctx.tmp_dir,
+            &ctx.surya_venv_dir,
+            &ctx.surya_script,
+            &ctx.pdfium_lib_path,
+        )
+    } else {
+        classify::classify_image(
+            abs,
+            &ctx.model,
+            &ctx.tmp_dir,
+            &ctx.surya_venv_dir,
+            &ctx.surya_script,
+        )
+    };
 
-    let thumb_path = thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path);
+    let thumb_path = if is_pdf {
+        thumbnail::generate_pdf_thumbnail(
+            abs,
+            &ctx.thumbnails_dir,
+            &probe.rel_path,
+            &ctx.pdfium_lib_path,
+        )
+    } else {
+        thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path)
+    };
 
-    let exif_location = crate::exif::extract_location(abs);
+    let exif_location = if is_pdf {
+        Default::default()
+    } else {
+        crate::exif::extract_location(abs)
+    };
 
     ClassifyAndThumbResult {
         classification,
@@ -313,7 +349,7 @@ fn collect_image_probes_incremental(
             continue;
         }
         let path = entry.path();
-        if !is_image(path) {
+        if !is_supported_file(path) {
             continue;
         }
 
@@ -447,12 +483,12 @@ fn fingerprint_file(path: &Path, size: u64) -> AppResult<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-fn is_image(path: &Path) -> bool {
+fn is_supported_file(path: &Path) -> bool {
     let Some(ext) = path.extension().map(|v| v.to_string_lossy().to_lowercase()) else {
         return false;
     };
     let ext = format!(".{ext}");
-    IMAGE_EXTS.contains(&ext.as_str())
+    SUPPORTED_EXTS.contains(&ext.as_str())
 }
 
 #[cfg(test)]
@@ -471,6 +507,7 @@ mod tests {
             surya_venv_dir: tmp.path().join("venv"),
             surya_script: tmp.path().join("surya_ocr.py"),
             model: "qwen2.5vl:7b".to_string(),
+            pdfium_lib_path: tmp.path().join("lib"),
         }
     }
 

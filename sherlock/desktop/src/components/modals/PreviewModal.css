@@ -113,6 +113,30 @@
   object-fit: contain;
 }
 
+/* ── PDF preview ──────────────────────────────────────────── */
+.preview-pdf-wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  background: #1e1e1e;
+}
+
+/* ── Split layout (dual-pdf, pdf-plus-image) ─────────────── */
+.preview-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.preview-split-pane {
+  overflow-y: auto;
+  min-height: 0;
+}
+
 .preview-info {
   padding: 10px 14px;
   border-top: 1px solid var(--border-primary);

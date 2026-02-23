@@ -1,0 +1,40 @@
+/* ── PDF Viewer ────────────────────────────────────────────── */
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  background: #1e1e1e;
+  width: 100%;
+  height: 100%;
+}
+
+.pdf-viewer-page {
+  margin: 8px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.pdf-viewer-page canvas {
+  display: block;
+  max-width: 100%;
+  height: auto !important;
+}
+
+.pdf-viewer-page-label {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  padding: 2px 0 4px;
+}
+
+.pdf-viewer-loading {
+  padding: 24px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.pdf-viewer-error {
+  padding: 24px;
+  color: var(--text-error, #f44);
+  text-align: center;
+}

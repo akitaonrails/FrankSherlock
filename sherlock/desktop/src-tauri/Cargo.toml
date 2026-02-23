@@ -41,6 +41,7 @@ which = "8"
 sysinfo = "0.34"
 kamadak-exif = "0.6"
 reverse_geocoder = "4"
+pdfium-render = "0.8"
 
 [dev-dependencies]
 tempfile = "3"

@@ -7,9 +7,10 @@ type Props = {
   setup: SetupStatus;
   onRecheck: () => void;
   onDownload: () => void;
+  onClose?: () => void;
 };
 
-export default function SetupModal({ setup, onRecheck, onDownload }: Props) {
+export default function SetupModal({ setup, onRecheck, onDownload, onClose }: Props) {
   return (
     <ModalOverlay>
       <div className="modal-base setup-modal">
@@ -62,6 +63,7 @@ export default function SetupModal({ setup, onRecheck, onDownload }: Props) {
           >
             {setup.download.status === "running" ? "Downloading..." : "Download model"}
           </button>
+          {onClose && <button type="button" onClick={onClose}>Close</button>}
         </div>
       </div>
     </ModalOverlay>

@@ -30,6 +30,8 @@ type GridNavParams = {
   onLoadMore: () => void;
   onRequestDelete: () => void;
   onRequestRename: () => void;
+  forceShowSetup: boolean;
+  setForceShowSetup: (show: boolean) => void;
 };
 
 export function useGridNavigation(p: GridNavParams) {
@@ -44,8 +46,16 @@ export function useGridNavigation(p: GridNavParams) {
         return;
       }
 
+      if (e.key === "F11") {
+        e.preventDefault();
+        p.setForceShowSetup(!p.forceShowSetup);
+        return;
+      }
+
       if (e.key === "Escape") {
-        if (p.showSummary) {
+        if (p.forceShowSetup) {
+          p.setForceShowSetup(false);
+        } else if (p.showSummary) {
           p.setCompletedJobs([]);
         } else if (p.showResumeModal) {
           p.setShowResumeModal(false);
@@ -149,6 +159,6 @@ export function useGridNavigation(p: GridNavParams) {
   }, [
     p.focusIndex, p.anchorIndex, p.selectedIndices, p.previewOpen,
     p.items.length, p.showSummary, p.showResumeModal, p.confirmDeleteRoot,
-    p.showHelp, p.hasModalOpen, p.setup?.isReady, p.canLoadMore,
+    p.showHelp, p.hasModalOpen, p.setup?.isReady, p.canLoadMore, p.forceShowSetup,
   ]);
 }

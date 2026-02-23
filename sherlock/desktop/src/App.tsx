@@ -64,6 +64,7 @@ export default function App() {
   const [renameItem, setRenameItem] = useState<SearchItem | null>(null);
   const [showModelInfo, setShowModelInfo] = useState(false);
   const [editMetadataItem, setEditMetadataItem] = useState<SearchItem | null>(null);
+  const [forceShowSetup, setForceShowSetup] = useState(false); // F11 debug toggle
 
   /* ── Refs ── */
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -151,6 +152,8 @@ export default function App() {
     setShowHelp,
     onRequestDelete,
     onRequestRename,
+    forceShowSetup,
+    setForceShowSetup,
   });
 
   /* ── Derived values ── */
@@ -296,8 +299,8 @@ export default function App() {
   return (
     <div className="app-shell">
       {/* ── Modals ── */}
-      {setup && !setup.isReady && (
-        <SetupModal setup={setup} onRecheck={scanManager.onRecheckSetup} onDownload={scanManager.onSetupDownload} />
+      {setup && (!setup.isReady || forceShowSetup) && (
+        <SetupModal setup={setup} onRecheck={scanManager.onRecheckSetup} onDownload={scanManager.onSetupDownload} onClose={forceShowSetup ? () => setForceShowSetup(false) : undefined} />
       )}
       {showResumeModal && (
         <ResumeModal

@@ -743,6 +743,104 @@ pub fn classify_image(
     }
 }
 
+// ---------------------------------------------------------------------------
+// PDF classification entry point
+// ---------------------------------------------------------------------------
+
+pub fn classify_pdf(
+    pdf_path: &Path,
+    model: &str,
+    tmp_dir: &Path,
+    surya_venv: &Path,
+    surya_script: &Path,
+    pdfium_lib: &Path,
+) -> ClassificationResult {
+    log::info!("Classifying PDF: {}", pdf_path.display());
+
+    // Step 1: Extract text from PDF
+    let (full_text, page_count) = match crate::pdf::extract_text(pdf_path, pdfium_lib) {
+        Ok(result) => result,
+        Err(e) => {
+            log::warn!(
+                "Failed to extract text from PDF {}: {e}",
+                pdf_path.display()
+            );
+            (String::new(), 0)
+        }
+    };
+
+    let media_type = "document".to_string();
+    let mut description = format!("PDF document ({page_count} pages)");
+    let mut extracted_text;
+    let canonical_mentions = String::new();
+
+    if !crate::pdf::is_scanned_pdf(&full_text, page_count) {
+        // Text-rich PDF: use extracted text for LLM document field extraction
+        extracted_text = full_text.clone();
+        let context = if full_text.len() > 2000 {
+            &full_text[..2000]
+        } else {
+            &full_text
+        };
+        let doc_fields = extract_document_fields(model, context);
+        if let Some(kind) = doc_fields.get("document_kind").and_then(clean_nullable_str) {
+            description = format!("{description} [Doc: {kind}]");
+        }
+        if let Some(issuer) = doc_fields.get("issuer").and_then(clean_nullable_str) {
+            description = format!("{description} [Issuer: {issuer}]");
+        }
+    } else {
+        // Scanned PDF: render first content page and run OCR
+        extracted_text = String::new();
+        let content_pages =
+            crate::pdf::find_content_pages(pdf_path, 1, pdfium_lib).unwrap_or_else(|_| vec![0]);
+        let page_idx = content_pages.first().copied().unwrap_or(0);
+
+        // Render page to temp image for OCR
+        match crate::pdf::render_page(pdf_path, page_idx, 200, pdfium_lib) {
+            Ok(img) => {
+                let _ = std::fs::create_dir_all(tmp_dir);
+                let tmp_img_path = tmp_dir.join("_pdf_ocr_page.png");
+                if let Err(e) = img.save(&tmp_img_path) {
+                    log::warn!("Failed to save PDF page for OCR: {e}");
+                } else {
+                    let ocr = run_ocr(model, &tmp_img_path, tmp_dir, surya_venv, surya_script);
+                    if ocr.ok && !ocr.text.is_empty() {
+                        extracted_text = ocr.text.clone();
+
+                        let doc_fields = extract_document_fields(model, &ocr.text);
+                        if let Some(kind) =
+                            doc_fields.get("document_kind").and_then(clean_nullable_str)
+                        {
+                            description = format!("{description} [Doc: {kind}]");
+                        }
+                        if let Some(issuer) = doc_fields.get("issuer").and_then(clean_nullable_str)
+                        {
+                            description = format!("{description} [Issuer: {issuer}]");
+                        }
+                    }
+                    let _ = std::fs::remove_file(&tmp_img_path);
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to render PDF page for OCR: {e}");
+            }
+        }
+    }
+
+    let lang_hint = detect_lang_hint(&extracted_text);
+    let confidence = if extracted_text.is_empty() { 0.3 } else { 0.7 } as f32;
+
+    ClassificationResult {
+        media_type,
+        description,
+        extracted_text,
+        canonical_mentions,
+        confidence,
+        lang_hint,
+    }
+}
+
 fn detect_lang_hint(text: &str) -> String {
     if text.is_empty() {
         return "unknown".to_string();

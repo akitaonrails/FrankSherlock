@@ -250,6 +250,7 @@ pub struct ScanContext {
     pub surya_venv_dir: std::path::PathBuf,
     pub surya_script: std::path::PathBuf,
     pub model: String,
+    pub pdfium_lib_path: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone)]

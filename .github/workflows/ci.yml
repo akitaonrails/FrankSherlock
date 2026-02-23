@@ -56,6 +56,11 @@ jobs:
         working-directory: sherlock/desktop
         run: npm ci
 
+      - name: Download PDFium
+        working-directory: sherlock/desktop/src-tauri
+        shell: bash
+        run: bash scripts/download-pdfium.sh
+
       - name: Run Rust tests
         working-directory: sherlock/desktop/src-tauri
         run: cargo test

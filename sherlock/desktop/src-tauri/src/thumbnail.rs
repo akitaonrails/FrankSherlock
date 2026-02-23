@@ -73,6 +73,126 @@ pub fn generate_thumbnail(source_path: &Path, thumb_dir: &Path, rel_path: &str) 
     Some(thumb_path.display().to_string())
 }
 
+/// Generate a thumbnail for a PDF: up to 2 content pages side-by-side, 300px max dimension.
+pub fn generate_pdf_thumbnail(
+    pdf_path: &Path,
+    thumb_dir: &Path,
+    rel_path: &str,
+    pdfium_lib: &Path,
+) -> Option<String> {
+    let stem = normalize_rel_path(&Path::new(rel_path).with_extension("jpg").to_string_lossy());
+    let thumb_path = thumb_dir.join(&stem);
+
+    // Skip if thumbnail already exists and source mtime hasn't changed
+    if thumb_path.exists() {
+        let source_mtime = std::fs::metadata(pdf_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        let thumb_mtime = std::fs::metadata(&thumb_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if let (Some(s), Some(t)) = (source_mtime, thumb_mtime) {
+            if t >= s {
+                return Some(thumb_path.display().to_string());
+            }
+        }
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = thumb_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create thumbnail dir {}: {e}", parent.display());
+            return None;
+        }
+    }
+
+    // Find up to 2 non-blank content pages
+    let content_pages = match crate::pdf::find_content_pages(pdf_path, 2, pdfium_lib) {
+        Ok(pages) => pages,
+        Err(e) => {
+            log::warn!(
+                "Failed to find content pages in PDF {}: {e}",
+                pdf_path.display()
+            );
+            return None;
+        }
+    };
+
+    if content_pages.is_empty() {
+        return None;
+    }
+
+    // Render each content page at moderate resolution (150px width target)
+    let mut page_images: Vec<image::DynamicImage> = Vec::new();
+    for &page_idx in &content_pages {
+        match crate::pdf::render_page(pdf_path, page_idx, 96, pdfium_lib) {
+            Ok(img) => {
+                // Scale page to ~150px width
+                let target_w = 150u32;
+                let scale = target_w as f64 / img.width().max(1) as f64;
+                let new_h = (img.height() as f64 * scale).round() as u32;
+                let resized = img.resize(target_w, new_h, image::imageops::FilterType::Lanczos3);
+                page_images.push(resized);
+            }
+            Err(e) => {
+                log::warn!("Failed to render PDF page {page_idx}: {e}");
+            }
+        }
+    }
+
+    if page_images.is_empty() {
+        return None;
+    }
+
+    // Stitch pages side-by-side if we have 2 pages
+    let composite = if page_images.len() >= 2 {
+        let gap = 2u32;
+        let w = page_images[0].width() + gap + page_images[1].width();
+        let h = page_images[0].height().max(page_images[1].height());
+        let mut canvas = image::RgbImage::from_pixel(w, h, image::Rgb([40, 40, 40]));
+        image::imageops::overlay(&mut canvas, &page_images[0].to_rgb8(), 0, 0);
+        image::imageops::overlay(
+            &mut canvas,
+            &page_images[1].to_rgb8(),
+            (page_images[0].width() + gap) as i64,
+            0,
+        );
+        image::DynamicImage::ImageRgb8(canvas)
+    } else {
+        page_images.into_iter().next().unwrap()
+    };
+
+    // Scale composite so longest side is 300px
+    let max_dim = 300u32;
+    let (w, h) = (composite.width(), composite.height());
+    let final_img = if w > max_dim || h > max_dim {
+        let scale = max_dim as f64 / w.max(h) as f64;
+        let new_w = (w as f64 * scale).round() as u32;
+        let new_h = (h as f64 * scale).round() as u32;
+        composite.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
+    } else {
+        composite
+    };
+
+    let rgb = final_img.to_rgb8();
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 80);
+    if let Err(e) = rgb.write_with_encoder(encoder) {
+        log::warn!("Failed to encode PDF thumbnail: {e}");
+        return None;
+    }
+
+    if let Err(e) = std::fs::write(&thumb_path, buf.into_inner()) {
+        log::warn!(
+            "Failed to write PDF thumbnail {}: {e}",
+            thumb_path.display()
+        );
+        return None;
+    }
+
+    Some(thumb_path.display().to_string())
+}
+
 /// For GIF files, extract the first frame. For other formats, return as-is.
 fn first_frame_if_gif(path: &Path) -> PathBuf {
     let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase());

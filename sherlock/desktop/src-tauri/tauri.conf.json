@@ -37,7 +37,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "scripts/surya_ocr.py": "scripts/surya_ocr.py"
+      "scripts/surya_ocr.py": "scripts/surya_ocr.py",
+      "lib/*": "lib/"
     },
     "icon": [
       "icons/32x32.png",

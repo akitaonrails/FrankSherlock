@@ -5,6 +5,7 @@ mod error;
 mod exif;
 mod llm;
 mod models;
+mod pdf;
 mod platform;
 mod query_parser;
 mod runtime;
@@ -411,11 +412,8 @@ fn compute_setup_status(app_state: &AppState) -> SetupStatus {
         let mut steps = vec!["Ollama is not detected.".to_string()];
         match os {
             platform::OsKind::Linux => {
-                steps.push(
-                    "Install: curl -fsSL https://ollama.com/install.sh | sh".to_string(),
-                );
-                steps
-                    .push("Start: ollama serve (or: systemctl start ollama)".to_string());
+                steps.push("Install: curl -fsSL https://ollama.com/install.sh | sh".to_string());
+                steps.push("Start: ollama serve (or: systemctl start ollama)".to_string());
             }
             platform::OsKind::MacOS => {
                 steps.push(
@@ -428,9 +426,7 @@ fn compute_setup_status(app_state: &AppState) -> SetupStatus {
             }
             platform::OsKind::Windows => {
                 steps.push("Install: download from ollama.com/download".to_string());
-                steps.push(
-                    "Start Ollama from the Start Menu, or run: ollama serve".to_string(),
-                );
+                steps.push("Start Ollama from the Start Menu, or run: ollama serve".to_string());
             }
         }
         steps.push("Then click 'Recheck' above.".to_string());
@@ -513,8 +509,29 @@ fn resolve_surya_script(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
         .join("surya_ocr.py")
 }
 
+fn resolve_pdfium_lib(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
+    // In production builds, PDFium is bundled as a Tauri resource.
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let lib_dir = resource_dir.join("lib");
+        let lib_name = if cfg!(target_os = "linux") {
+            "libpdfium.so"
+        } else if cfg!(target_os = "macos") {
+            "libpdfium.dylib"
+        } else {
+            "pdfium.dll"
+        };
+        let bundled = lib_dir.join(lib_name);
+        if bundled.exists() {
+            return lib_dir;
+        }
+    }
+    // Dev fallback: look in src-tauri/lib/
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib")
+}
+
 fn build_scan_context(app_state: &AppState, app_handle: &tauri::AppHandle) -> models::ScanContext {
     let surya_script = resolve_surya_script(app_handle);
+    let pdfium_lib_path = resolve_pdfium_lib(app_handle);
     let (model_tag, _, _) = llm::recommended_model(&app_state.gpu_info);
     models::ScanContext {
         db_path: app_state.paths.db_file.clone(),
@@ -523,6 +540,7 @@ fn build_scan_context(app_state: &AppState, app_handle: &tauri::AppHandle) -> mo
         surya_venv_dir: app_state.paths.surya_venv_dir.clone(),
         surya_script,
         model: model_tag.to_string(),
+        pdfium_lib_path,
     }
 }
 
