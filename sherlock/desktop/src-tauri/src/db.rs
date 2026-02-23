@@ -6,13 +6,23 @@ use rusqlite::{params, params_from_iter, types::Value, Connection, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    DbStats, ExistingFile, FileRecordUpsert, ParsedQuery, ScanJobState, ScanJobStatus, SearchItem,
-    SearchRequest, SearchResponse,
+    DbStats, ExistingFile, FileRecordUpsert, HealthCheckOutcome, ParsedQuery, PurgeResult,
+    RootInfo, ScanJobState, ScanJobStatus, SearchItem, SearchRequest, SearchResponse,
 };
 use crate::query_parser::parse_query;
 
 const DEFAULT_LIMIT: u32 = 80;
 const MAX_LIMIT: u32 = 200;
+
+/// Centralized connection helper. Sets busy_timeout and foreign_keys on every
+/// connection so CASCADE constraints are active and concurrent access doesn't
+/// fail immediately with SQLITE_BUSY.
+fn open_conn(db_path: &Path) -> AppResult<Connection> {
+    let conn = Connection::open(db_path)?;
+    conn.pragma_update(None, "busy_timeout", 5000)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(conn)
+}
 
 pub fn init_database(db_path: &Path) -> AppResult<()> {
     let conn = Connection::open(db_path)?;
@@ -97,7 +107,7 @@ pub fn init_database(db_path: &Path) -> AppResult<()> {
 }
 
 pub fn recover_incomplete_scan_jobs(db_path: &Path) -> AppResult<u64> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let now = now_epoch_secs();
     let updated = conn.execute(
         "UPDATE scan_jobs
@@ -109,7 +119,7 @@ pub fn recover_incomplete_scan_jobs(db_path: &Path) -> AppResult<u64> {
 }
 
 pub fn database_stats(db_path: &Path) -> AppResult<DbStats> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let roots: i64 = conn.query_row("SELECT COUNT(*) FROM roots", [], |r| r.get(0))?;
     let files: i64 = conn.query_row(
         "SELECT COUNT(*) FROM files WHERE deleted_at IS NULL",
@@ -122,8 +132,13 @@ pub fn database_stats(db_path: &Path) -> AppResult<DbStats> {
     })
 }
 
+#[cfg(test)]
 pub fn upsert_root(db_path: &Path, root_path: &str) -> AppResult<i64> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
+    upsert_root_conn(&conn, root_path)
+}
+
+fn upsert_root_conn(conn: &Connection, root_path: &str) -> AppResult<i64> {
     if let Ok(id) = conn.query_row(
         "SELECT id FROM roots WHERE root_path = ?1",
         params![root_path],
@@ -145,7 +160,7 @@ pub fn upsert_root(db_path: &Path, root_path: &str) -> AppResult<i64> {
 }
 
 pub fn touch_root_scan(db_path: &Path, root_id: i64) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.execute(
         "UPDATE roots SET last_scan_at = ?2 WHERE id = ?1",
         params![root_id, now_epoch_secs()],
@@ -154,11 +169,12 @@ pub fn touch_root_scan(db_path: &Path, root_id: i64) -> AppResult<()> {
 }
 
 pub fn create_or_resume_scan_job(db_path: &Path, root_path: &str) -> AppResult<ScanJobStatus> {
-    let root_id = upsert_root(db_path, root_path)?;
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+    let root_id = upsert_root_conn(&tx, root_path)?;
     let now = now_epoch_secs();
 
-    let maybe_job_id: Option<i64> = conn
+    let maybe_job_id: Option<i64> = tx
         .query_row(
             "SELECT id
              FROM scan_jobs
@@ -171,18 +187,19 @@ pub fn create_or_resume_scan_job(db_path: &Path, root_path: &str) -> AppResult<S
         .ok();
 
     if let Some(job_id) = maybe_job_id {
-        conn.execute(
+        tx.execute(
             "UPDATE scan_jobs
              SET status = 'running', error_text = NULL, updated_at = ?2
              WHERE id = ?1",
             params![job_id, now],
         )?;
+        tx.commit()?;
         return get_scan_job(db_path, job_id)?
             .ok_or_else(|| AppError::Config("missing scan job after resume".to_string()));
     }
 
     let scan_marker = now_epoch_millis();
-    conn.execute(
+    tx.execute(
         "INSERT INTO scan_jobs(
             root_id, root_path, status, scan_marker,
             total_files, processed_files, added, modified, moved, unchanged, deleted,
@@ -194,13 +211,14 @@ pub fn create_or_resume_scan_job(db_path: &Path, root_path: &str) -> AppResult<S
          )",
         params![root_id, root_path, scan_marker, now],
     )?;
-    let job_id = conn.last_insert_rowid();
+    let job_id = tx.last_insert_rowid();
+    tx.commit()?;
     get_scan_job(db_path, job_id)?
         .ok_or_else(|| AppError::Config("missing scan job after insert".to_string()))
 }
 
 pub fn list_resumable_scan_jobs(db_path: &Path) -> AppResult<Vec<ScanJobStatus>> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT
             id, root_id, root_path, status, scan_marker, total_files, processed_files,
@@ -219,7 +237,7 @@ pub fn list_resumable_scan_jobs(db_path: &Path) -> AppResult<Vec<ScanJobStatus>>
 }
 
 pub fn get_scan_job(db_path: &Path, job_id: i64) -> AppResult<Option<ScanJobStatus>> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT
             id, root_id, root_path, status, scan_marker, total_files, processed_files,
@@ -236,7 +254,7 @@ pub fn get_scan_job(db_path: &Path, job_id: i64) -> AppResult<Option<ScanJobStat
 }
 
 pub fn get_scan_job_state(db_path: &Path, job_id: i64) -> AppResult<ScanJobState> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.query_row(
         "SELECT
             root_id, root_path, scan_marker, processed_files,
@@ -272,7 +290,7 @@ pub fn checkpoint_scan_job(
     moved: u64,
     unchanged: u64,
 ) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.execute(
         "UPDATE scan_jobs
          SET status = 'running',
@@ -306,7 +324,7 @@ pub fn complete_scan_job_by_id(
     summary: &crate::models::ScanSummary,
     cursor_rel_path: Option<&str>,
 ) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let now = now_epoch_secs();
     conn.execute(
         "UPDATE scan_jobs
@@ -340,7 +358,7 @@ pub fn complete_scan_job_by_id(
 }
 
 pub fn cancel_scan_job(db_path: &Path, job_id: i64) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.execute(
         "UPDATE scan_jobs SET status = 'interrupted', error_text = 'cancelled by user', updated_at = ?2
          WHERE id = ?1 AND status = 'running'",
@@ -350,7 +368,7 @@ pub fn cancel_scan_job(db_path: &Path, job_id: i64) -> AppResult<()> {
 }
 
 pub fn fail_scan_job(db_path: &Path, job_id: i64, error_text: &str) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.execute(
         "UPDATE scan_jobs
          SET status = 'failed',
@@ -363,7 +381,7 @@ pub fn fail_scan_job(db_path: &Path, job_id: i64, error_text: &str) -> AppResult
 }
 
 pub fn load_existing_files(db_path: &Path, root_id: i64) -> AppResult<Vec<ExistingFile>> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT id, rel_path, fingerprint, mtime_ns, size_bytes, confidence
          FROM files
@@ -394,7 +412,7 @@ pub fn touch_file_scan_marker(
     rel_path: &str,
     scan_marker: i64,
 ) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.execute(
         "UPDATE files SET scan_marker = ?1, updated_at = ?2 WHERE root_id = ?3 AND rel_path = ?4",
         params![scan_marker, now_epoch_secs(), root_id, rel_path],
@@ -407,7 +425,7 @@ pub fn get_deleted_file_paths(
     root_id: i64,
     deleted_at: i64,
 ) -> AppResult<Vec<(String, Option<String>)>> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT rel_path, thumb_path FROM files WHERE root_id = ?1 AND deleted_at = ?2",
     )?;
@@ -427,7 +445,7 @@ pub fn update_file_thumb_path(
     rel_path: &str,
     thumb_path: &str,
 ) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     conn.execute(
         "UPDATE files SET thumb_path = ?1, updated_at = ?2 WHERE root_id = ?3 AND rel_path = ?4",
         params![thumb_path, now_epoch_secs(), root_id, rel_path],
@@ -436,9 +454,10 @@ pub fn update_file_thumb_path(
 }
 
 pub fn upsert_file_record(db_path: &Path, record: &FileRecordUpsert) -> AppResult<i64> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
     let now = now_epoch_secs();
-    conn.execute(
+    tx.execute(
         r#"
         INSERT INTO files (
             root_id, rel_path, filename, abs_path,
@@ -486,12 +505,13 @@ pub fn upsert_file_record(db_path: &Path, record: &FileRecordUpsert) -> AppResul
         ],
     )?;
 
-    let file_id: i64 = conn.query_row(
+    let file_id: i64 = tx.query_row(
         "SELECT id FROM files WHERE root_id = ?1 AND rel_path = ?2",
         params![record.root_id, record.rel_path],
         |r| r.get(0),
     )?;
-    refresh_fts(&conn, file_id)?;
+    refresh_fts(&tx, file_id)?;
+    tx.commit()?;
     Ok(file_id)
 }
 
@@ -505,8 +525,9 @@ pub fn move_file_by_id(
     size_bytes: i64,
     scan_marker: i64,
 ) -> AppResult<()> {
-    let conn = Connection::open(db_path)?;
-    conn.execute(
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         r#"
         UPDATE files
         SET rel_path = ?2,
@@ -530,21 +551,47 @@ pub fn move_file_by_id(
             now_epoch_secs()
         ],
     )?;
-    refresh_fts(&conn, file_id)?;
+    refresh_fts(&tx, file_id)?;
+    tx.commit()?;
     Ok(())
 }
 
 pub fn mark_missing_as_deleted(db_path: &Path, root_id: i64, scan_marker: i64) -> AppResult<u64> {
-    let conn = Connection::open(db_path)?;
-    let affected = conn.execute(
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+    let now = now_epoch_secs();
+
+    // Collect IDs of files about to be soft-deleted
+    let mut stmt = tx.prepare(
+        "SELECT id FROM files WHERE root_id = ?1 AND deleted_at IS NULL AND scan_marker <> ?2",
+    )?;
+    let ids: Vec<i64> = stmt
+        .query_map(params![root_id, scan_marker], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    if ids.is_empty() {
+        tx.commit()?;
+        return Ok(0);
+    }
+
+    // Soft-delete files
+    tx.execute(
         "UPDATE files
          SET deleted_at = ?3, updated_at = ?3
          WHERE root_id = ?1
            AND deleted_at IS NULL
            AND scan_marker <> ?2",
-        params![root_id, scan_marker, now_epoch_secs()],
+        params![root_id, scan_marker, now],
     )?;
-    Ok(affected as u64)
+
+    // Remove their FTS entries
+    for id in &ids {
+        tx.execute("DELETE FROM files_fts WHERE rowid = ?1", params![id])?;
+    }
+
+    tx.commit()?;
+    Ok(ids.len() as u64)
 }
 
 fn refresh_fts(conn: &Connection, file_id: i64) -> AppResult<()> {
@@ -560,6 +607,189 @@ fn refresh_fts(conn: &Connection, file_id: i64) -> AppResult<()> {
     )?;
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Root management
+// ---------------------------------------------------------------------------
+
+pub fn list_roots(db_path: &Path) -> AppResult<Vec<RootInfo>> {
+    let conn = open_conn(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT r.id, r.root_path, r.root_name, r.created_at, r.last_scan_at,
+                (SELECT COUNT(*) FROM files f WHERE f.root_id = r.id AND f.deleted_at IS NULL)
+         FROM roots r ORDER BY r.id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(RootInfo {
+            id: row.get(0)?,
+            root_path: row.get(1)?,
+            root_name: row.get(2)?,
+            created_at: row.get(3)?,
+            last_scan_at: row.get(4)?,
+            file_count: row.get::<_, i64>(5)? as u64,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+pub fn purge_root(db_path: &Path, root_id: i64) -> AppResult<PurgeResult> {
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+
+    // Collect file IDs and thumb_paths for cleanup
+    let mut stmt =
+        tx.prepare("SELECT id, thumb_path FROM files WHERE root_id = ?1")?;
+    let file_rows: Vec<(i64, Option<String>)> = stmt
+        .query_map(params![root_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    let file_ids: Vec<i64> = file_rows.iter().map(|(id, _)| *id).collect();
+    let thumb_paths: Vec<String> = file_rows
+        .iter()
+        .filter_map(|(_, tp)| tp.clone())
+        .collect();
+
+    // Delete FTS entries
+    for id in &file_ids {
+        tx.execute("DELETE FROM files_fts WHERE rowid = ?1", params![id])?;
+    }
+
+    // Delete files
+    let files_removed = tx.execute("DELETE FROM files WHERE root_id = ?1", params![root_id])?;
+
+    // Delete scan jobs
+    let jobs_removed = tx.execute("DELETE FROM scan_jobs WHERE root_id = ?1", params![root_id])?;
+
+    // Delete root
+    tx.execute("DELETE FROM roots WHERE id = ?1", params![root_id])?;
+
+    tx.commit()?;
+
+    // Best-effort thumbnail cleanup (outside transaction)
+    let mut thumbs_cleaned = 0u64;
+    for tp in &thumb_paths {
+        let path = Path::new(tp);
+        if path.exists() {
+            if std::fs::remove_file(path).is_ok() {
+                thumbs_cleaned += 1;
+            }
+        }
+    }
+
+    Ok(PurgeResult {
+        files_removed: files_removed as u64,
+        jobs_removed: jobs_removed as u64,
+        thumbs_cleaned,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Health check & backup
+// ---------------------------------------------------------------------------
+
+pub fn quick_check(db_path: &Path) -> AppResult<bool> {
+    let conn = open_conn(db_path)?;
+    let result: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+    Ok(result == "ok")
+}
+
+pub fn wal_checkpoint(db_path: &Path) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+    Ok(())
+}
+
+pub fn backup_database(db_path: &Path, backup_path: &Path) -> AppResult<()> {
+    use rusqlite::backup::Backup;
+    let src = open_conn(db_path)?;
+    let mut dst = Connection::open(backup_path)?;
+    let backup = Backup::new(&src, &mut dst)?;
+    backup.run_to_completion(100, std::time::Duration::from_millis(50), None)?;
+    Ok(())
+}
+
+pub fn restore_from_backup(backup_path: &Path, db_path: &Path) -> AppResult<()> {
+    if !backup_path.exists() {
+        return Err(AppError::Config("backup file does not exist".to_string()));
+    }
+    // Remove main DB + WAL + SHM
+    let _ = std::fs::remove_file(db_path);
+    let wal = db_path.with_extension("sqlite-wal");
+    let shm = db_path.with_extension("sqlite-shm");
+    let _ = std::fs::remove_file(&wal);
+    let _ = std::fs::remove_file(&shm);
+
+    std::fs::copy(backup_path, db_path)?;
+    init_database(db_path)?;
+    Ok(())
+}
+
+pub fn recreate_database(db_path: &Path) -> AppResult<()> {
+    let _ = std::fs::remove_file(db_path);
+    let wal = db_path.with_extension("sqlite-wal");
+    let shm = db_path.with_extension("sqlite-shm");
+    let _ = std::fs::remove_file(&wal);
+    let _ = std::fs::remove_file(&shm);
+    init_database(db_path)
+}
+
+pub fn startup_health_check(db_path: &Path, backup_dir: &Path) -> AppResult<HealthCheckOutcome> {
+    if !db_path.exists() {
+        return Ok(HealthCheckOutcome::Healthy);
+    }
+    match quick_check(db_path) {
+        Ok(true) => return Ok(HealthCheckOutcome::Healthy),
+        Ok(false) | Err(_) => {}
+    }
+    // Database is corrupt — attempt restore
+    let backup_path = backup_dir.join("index.sqlite.bak");
+    if backup_path.exists() {
+        if restore_from_backup(&backup_path, db_path).is_ok() {
+            return Ok(HealthCheckOutcome::RestoredFromBackup);
+        }
+    }
+    // No backup or restore failed — recreate
+    recreate_database(db_path)?;
+    Ok(HealthCheckOutcome::Recreated)
+}
+
+pub fn validate_and_purge_stale_roots(
+    db_path: &Path,
+    thumbnails_dir: &Path,
+) -> AppResult<Vec<String>> {
+    let roots = list_roots(db_path)?;
+    let mut purged = Vec::new();
+    for root in roots {
+        if !Path::new(&root.root_path).is_dir() {
+            let result = purge_root(db_path, root.id)?;
+            // Also try to clean up the thumbnail subtree for this root
+            let thumb_root = thumbnails_dir.join(&root.root_name);
+            if thumb_root.is_dir() {
+                let _ = std::fs::remove_dir_all(&thumb_root);
+            }
+            log::info!(
+                "Purged stale root '{}': {} files, {} jobs, {} thumbs cleaned",
+                root.root_path,
+                result.files_removed,
+                result.jobs_removed,
+                result.thumbs_cleaned
+            );
+            purged.push(root.root_path);
+        }
+    }
+    Ok(purged)
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
 
 pub fn search_images(db_path: &Path, request: &SearchRequest) -> AppResult<SearchResponse> {
     let parsed = parse_query(&request.query);
@@ -618,7 +848,7 @@ fn search_images_normalized(
     request: SearchRequest,
     parsed: ParsedQuery,
 ) -> AppResult<SearchResponse> {
-    let conn = Connection::open(db_path)?;
+    let conn = open_conn(db_path)?;
     let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = request.offset.unwrap_or(0);
     let query = request.query.trim().to_string();
@@ -706,7 +936,16 @@ fn search_images_normalized(
 
     let mut items = Vec::new();
     for item in rows {
-        items.push(item?);
+        let item = item?;
+        if items.len() < 3 {
+            log::info!(
+                "[search_debug] id={} rel_path={} thumb_path={:?}",
+                item.id,
+                item.rel_path,
+                item.thumbnail_path
+            );
+        }
+        items.push(item);
     }
 
     Ok(SearchResponse {
@@ -870,6 +1109,25 @@ mod tests {
         (dir, db_path)
     }
 
+    fn sample_record(root_id: i64, rel: &str, fp: &str) -> FileRecordUpsert {
+        FileRecordUpsert {
+            root_id,
+            rel_path: rel.to_string(),
+            abs_path: format!("/tmp/demo/{rel}"),
+            filename: rel.rsplit('/').next().unwrap_or(rel).to_string(),
+            media_type: "photo".to_string(),
+            description: format!("desc of {rel}"),
+            extracted_text: String::new(),
+            canonical_mentions: String::new(),
+            confidence: 0.7,
+            lang_hint: "en".to_string(),
+            mtime_ns: 1_700_000_000_000_000_000,
+            size_bytes: 10_000,
+            fingerprint: fp.to_string(),
+            scan_marker: 123,
+        }
+    }
+
     #[test]
     fn creates_schema_and_stats() {
         let (_dir, db_path) = test_db_path();
@@ -1016,7 +1274,7 @@ mod tests {
         upsert_file_record(&db_path, &rec).expect("upsert");
         touch_file_scan_marker(&db_path, root_id, "a.jpg", 2).expect("touch");
 
-        let conn = Connection::open(&db_path).expect("open");
+        let conn = open_conn(&db_path).expect("open");
         let (media_type, conf, marker): (String, f64, i64) = conn
             .query_row(
                 "SELECT media_type, confidence, scan_marker FROM files WHERE root_id = ?1 AND rel_path = ?2",
@@ -1081,7 +1339,7 @@ mod tests {
         upsert_file_record(&db_path, &rec).expect("upsert");
         mark_missing_as_deleted(&db_path, root_id, 99).expect("delete");
 
-        let conn = Connection::open(&db_path).expect("open");
+        let conn = open_conn(&db_path).expect("open");
         let deleted_at: i64 = conn
             .query_row(
                 "SELECT deleted_at FROM files WHERE root_id = ?1 AND rel_path = 'del.jpg'",
@@ -1111,5 +1369,223 @@ mod tests {
 
         let changed = recover_incomplete_scan_jobs(&db_path).expect("recover");
         assert!(changed >= 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // New tests: Phase 8
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_open_conn_sets_pragmas() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let conn = open_conn(&db_path).expect("open");
+
+        let timeout: i64 = conn
+            .pragma_query_value(None, "busy_timeout", |r| r.get(0))
+            .expect("busy_timeout");
+        assert_eq!(timeout, 5000);
+
+        let fk: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .expect("foreign_keys");
+        assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn test_purge_root_cascades() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/purge_test").expect("root");
+
+        // Insert files
+        for i in 0..3 {
+            upsert_file_record(&db_path, &sample_record(root_id, &format!("f{i}.jpg"), &format!("fp{i}")))
+                .expect("upsert");
+        }
+        // Create a scan job
+        create_or_resume_scan_job(&db_path, "/tmp/purge_test").expect("job");
+
+        // Verify data exists
+        let conn = open_conn(&db_path).expect("open");
+        let file_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files WHERE root_id = ?1", params![root_id], |r| r.get(0)).expect("count");
+        assert_eq!(file_count, 3);
+        let fts_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts count");
+        assert!(fts_count >= 3);
+        drop(conn);
+
+        // Purge
+        let result = purge_root(&db_path, root_id).expect("purge");
+        assert_eq!(result.files_removed, 3);
+        assert!(result.jobs_removed >= 1);
+
+        // Verify everything is gone
+        let conn = open_conn(&db_path).expect("open");
+        let root_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM roots WHERE id = ?1", params![root_id], |r| r.get(0)).expect("root count");
+        assert_eq!(root_count, 0);
+        let file_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files WHERE root_id = ?1", params![root_id], |r| r.get(0)).expect("file count");
+        assert_eq!(file_count, 0);
+        let fts_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts count");
+        assert_eq!(fts_count, 0);
+    }
+
+    #[test]
+    fn test_mark_missing_cleans_fts() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        // Insert a file with scan_marker=1
+        let rec = sample_record(root_id, "gone.jpg", "fp-gone");
+        upsert_file_record(&db_path, &FileRecordUpsert { scan_marker: 1, ..rec }).expect("upsert");
+
+        // Verify FTS entry exists
+        let conn = open_conn(&db_path).expect("open");
+        let fts_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts");
+        assert_eq!(fts_count, 1);
+        drop(conn);
+
+        // Mark missing with a different scan_marker
+        let deleted = mark_missing_as_deleted(&db_path, root_id, 999).expect("mark");
+        assert_eq!(deleted, 1);
+
+        // Verify FTS entry is gone
+        let conn = open_conn(&db_path).expect("open");
+        let fts_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM files_fts", [], |r| r.get(0)).expect("fts");
+        assert_eq!(fts_count, 0);
+    }
+
+    #[test]
+    fn test_quick_check_healthy_db() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        assert!(quick_check(&db_path).expect("check"));
+    }
+
+    #[test]
+    fn test_backup_and_restore() {
+        let (dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/backup_test").expect("root");
+        upsert_file_record(&db_path, &sample_record(root_id, "img.jpg", "fp-img"))
+            .expect("upsert");
+
+        // Backup
+        let backup_path = dir.path().join("backup.sqlite");
+        backup_database(&db_path, &backup_path).expect("backup");
+
+        // Corrupt original by truncating
+        std::fs::write(&db_path, b"corrupted").expect("corrupt");
+
+        // Restore
+        restore_from_backup(&backup_path, &db_path).expect("restore");
+
+        // Verify data is intact
+        let stats = database_stats(&db_path).expect("stats");
+        assert_eq!(stats.roots, 1);
+        assert_eq!(stats.files, 1);
+    }
+
+    #[test]
+    fn test_recreate_database() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        upsert_root(&db_path, "/tmp/recreate").expect("root");
+
+        recreate_database(&db_path).expect("recreate");
+
+        let stats = database_stats(&db_path).expect("stats");
+        assert_eq!(stats.roots, 0);
+        assert_eq!(stats.files, 0);
+        // Schema should still be valid
+        assert!(quick_check(&db_path).expect("check"));
+    }
+
+    #[test]
+    fn test_startup_health_check_healthy() {
+        let (dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let outcome = startup_health_check(&db_path, dir.path()).expect("health");
+        assert!(matches!(outcome, HealthCheckOutcome::Healthy));
+    }
+
+    #[test]
+    fn test_validate_and_purge_stale_roots() {
+        let (dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        // Insert root for a non-existent directory
+        let conn = open_conn(&db_path).expect("open");
+        conn.execute(
+            "INSERT INTO roots(root_path, root_name, created_at) VALUES (?1, ?2, ?3)",
+            params!["/nonexistent/path/that/does/not/exist", "ghost", now_epoch_secs()],
+        )
+        .expect("insert root");
+        drop(conn);
+
+        let thumbs_dir = dir.path().join("thumbs");
+        std::fs::create_dir_all(&thumbs_dir).expect("thumbs dir");
+
+        let purged = validate_and_purge_stale_roots(&db_path, &thumbs_dir).expect("validate");
+        assert_eq!(purged.len(), 1);
+        assert!(purged[0].contains("nonexistent"));
+
+        // Root should be gone
+        let roots = list_roots(&db_path).expect("list");
+        assert!(roots.is_empty());
+    }
+
+    #[test]
+    fn test_upsert_file_record_transactional() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        let rec = sample_record(root_id, "atomic.jpg", "fp-atomic");
+        let file_id = upsert_file_record(&db_path, &rec).expect("upsert");
+
+        // Verify both file record and FTS entry exist atomically
+        let conn = open_conn(&db_path).expect("open");
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM files WHERE id = ?1)",
+                params![file_id],
+                |r| r.get(0),
+            )
+            .expect("file exists");
+        assert!(exists);
+
+        let fts_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM files_fts WHERE rowid = ?1)",
+                params![file_id],
+                |r| r.get(0),
+            )
+            .expect("fts exists");
+        assert!(fts_exists);
+    }
+
+    #[test]
+    fn test_list_roots() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        upsert_root(&db_path, "/tmp/root_a").expect("root_a");
+        upsert_root(&db_path, "/tmp/root_b").expect("root_b");
+        upsert_root(&db_path, "/tmp/root_c").expect("root_c");
+
+        let roots = list_roots(&db_path).expect("list");
+        assert_eq!(roots.len(), 3);
+        let paths: Vec<&str> = roots.iter().map(|r| r.root_path.as_str()).collect();
+        assert!(paths.contains(&"/tmp/root_a"));
+        assert!(paths.contains(&"/tmp/root_b"));
+        assert!(paths.contains(&"/tmp/root_c"));
     }
 }

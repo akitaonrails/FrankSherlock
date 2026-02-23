@@ -85,6 +85,39 @@ fn default_base_dir() -> AppResult<PathBuf> {
     ))
 }
 
+// ---------------------------------------------------------------------------
+// User config (~/.config/frank_sherlock/config.json)
+// ---------------------------------------------------------------------------
+
+fn user_config_path() -> AppResult<PathBuf> {
+    if let Some(config_dir) = dirs::config_dir() {
+        return Ok(config_dir.join("frank_sherlock").join("config.json"));
+    }
+    Err(AppError::Config(
+        "could not resolve user config directory".to_string(),
+    ))
+}
+
+pub fn load_user_config() -> AppResult<serde_json::Value> {
+    let path = user_config_path()?;
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let data = std::fs::read_to_string(&path)?;
+    serde_json::from_str(&data).map_err(|e| AppError::Config(format!("invalid config JSON: {e}")))
+}
+
+pub fn save_user_config(config: &serde_json::Value) -> AppResult<()> {
+    let path = user_config_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let data = serde_json::to_string_pretty(config)
+        .map_err(|e| AppError::Config(format!("failed to serialize config: {e}")))?;
+    std::fs::write(&path, data)?;
+    Ok(())
+}
+
 pub fn canonical_root_path(path: &str) -> AppResult<PathBuf> {
     let root = Path::new(path);
     if !root.exists() {

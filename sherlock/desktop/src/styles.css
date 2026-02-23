@@ -133,13 +133,47 @@ body {
 }
 
 .sidebar-section {
-  padding: 8px 12px 4px;
+  padding: 10px 12px 4px;
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-secondary);
   user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-add-btn {
+  all: unset;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.sidebar-add-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-add-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sidebar-empty {
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-style: italic;
 }
 
 .sidebar-item {
@@ -152,7 +186,7 @@ body {
   color: var(--text-secondary);
 }
 
-.sidebar button {
+.sidebar-action-btn {
   display: block;
   width: calc(100% - 16px);
   margin: 4px 8px;
@@ -167,15 +201,123 @@ body {
   text-align: left;
 }
 
-.sidebar button:hover {
+.sidebar-action-btn:hover {
   border-color: var(--border-focus);
 }
 
-.sidebar button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.sidebar-spacer {
+  flex: 1;
 }
 
+/* ── Root cards ──────────────────────────────────────────── */
+.root-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 6px;
+}
+
+.root-card {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.root-card:hover {
+  background: var(--bg-hover);
+}
+
+.root-card.selected {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.root-card:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.root-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.root-card-icon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.root-card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.root-card-delete {
+  all: unset;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+
+.root-card:hover .root-card-delete,
+.root-card.selected .root-card-delete {
+  opacity: 1;
+}
+
+.root-card-delete:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.root-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  padding-left: 22px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.root-card-scan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-left: 22px;
+}
+
+.root-card-scan progress {
+  flex: 1;
+  height: 4px;
+}
+
+.root-card-scan span {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ── Sidebar scan progress (global) ─────────────────────── */
 .sidebar-scan-progress {
   margin: 4px 8px;
   padding: 6px 8px;
@@ -191,10 +333,109 @@ body {
   margin-top: 4px;
 }
 
+.sidebar-scan-progress button {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-align: center;
+}
+
+.sidebar-scan-progress button:hover {
+  border-color: var(--border-focus);
+}
+
 .sidebar-scan-meta {
   margin-top: 4px;
   color: var(--text-secondary);
   font-size: 0.75rem;
+}
+
+.sidebar-scan-progress-header {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+/* ── Confirm delete modal ────────────────────────────────── */
+.confirm-modal {
+  width: min(420px, 90%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.confirm-modal h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.confirm-modal p {
+  margin: 0 0 8px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.confirm-path {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border-primary);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+  font-family: monospace;
+}
+
+.confirm-note {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.confirm-actions button {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.confirm-actions button:hover {
+  border-color: var(--border-focus);
+}
+
+.danger-btn {
+  background: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+}
+
+.danger-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── Scanning indicator ──────────────────────────────────── */
+.scanning-indicator {
+  color: var(--accent);
+  font-weight: 500;
 }
 
 /* ── Content ──────────────────────────────────────────────── */

@@ -221,3 +221,29 @@ pub struct ClassificationResult {
     pub confidence: f32,
     pub lang_hint: String,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootInfo {
+    pub id: i64,
+    pub root_path: String,
+    pub root_name: String,
+    pub created_at: i64,
+    pub last_scan_at: Option<i64>,
+    pub file_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PurgeResult {
+    pub files_removed: u64,
+    pub jobs_removed: u64,
+    pub thumbs_cleaned: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum HealthCheckOutcome {
+    Healthy,
+    RestoredFromBackup,
+    Recreated,
+}

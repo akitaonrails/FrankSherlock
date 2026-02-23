@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex};
 use config::{prepare_dirs, resolve_paths, AppPaths};
 use error::{AppError, AppResult};
 use models::{
-    CleanupResult, HealthStatus, RuntimeStatus, ScanJobStatus, SearchRequest, SearchResponse,
-    SetupDownloadStatus, SetupStatus,
+    CleanupResult, HealthCheckOutcome, HealthStatus, PurgeResult, RootInfo, RuntimeStatus,
+    ScanJobStatus, SearchRequest, SearchResponse, SetupDownloadStatus, SetupStatus,
 };
 use tauri::Manager;
 use tauri::State;
@@ -205,6 +205,26 @@ fn cancel_scan(job_id: i64, state: State<'_, AppState>) -> Result<bool, String> 
     }
 }
 
+#[tauri::command]
+fn remove_root(root_id: i64, state: State<'_, AppState>) -> Result<PurgeResult, String> {
+    db::purge_root(&state.paths.db_file, root_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_roots(state: State<'_, AppState>) -> Result<Vec<RootInfo>, String> {
+    db::list_roots(&state.paths.db_file).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_user_config() -> Result<serde_json::Value, String> {
+    config::load_user_config().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_user_config(config: serde_json::Value) -> Result<(), String> {
+    config::save_user_config(&config).map_err(|e| e.to_string())
+}
+
 fn compute_setup_status(app_state: &AppState) -> SetupStatus {
     let required_models = REQUIRED_OLLAMA_MODELS
         .iter()
@@ -382,6 +402,16 @@ fn spawn_scan_worker_if_needed(app_state: AppState, job_id: i64) {
                 if let Err(e) = cleanup_ollama_models_impl() {
                     log::warn!("Auto-cleanup after scan failed: {e}");
                 }
+                // WAL checkpoint + backup after successful scan
+                if let Err(e) = db::wal_checkpoint(&app_state_for_task.paths.db_file) {
+                    log::warn!("WAL checkpoint after scan failed: {e}");
+                }
+                let backup_path = app_state_for_task.paths.db_dir.join("index.sqlite.bak");
+                if let Err(e) =
+                    db::backup_database(&app_state_for_task.paths.db_file, &backup_path)
+                {
+                    log::warn!("Post-scan backup failed: {e}");
+                }
             }
             Err(err) => {
                 let _ = db::fail_scan_job(
@@ -434,6 +464,33 @@ pub fn run() {
             prepare_dirs(&paths)?;
             db::init_database(&paths.db_file)?;
             db::recover_incomplete_scan_jobs(&paths.db_file)?;
+
+            // Health check
+            match db::startup_health_check(&paths.db_file, &paths.db_dir) {
+                Ok(HealthCheckOutcome::RestoredFromBackup) => {
+                    log::warn!("Database restored from backup");
+                }
+                Ok(HealthCheckOutcome::Recreated) => {
+                    log::warn!("Database was recreated (previous was corrupt)");
+                }
+                Ok(HealthCheckOutcome::Healthy) => {}
+                Err(e) => {
+                    log::error!("Startup health check failed: {e}");
+                }
+            }
+
+            // Purge stale roots
+            match db::validate_and_purge_stale_roots(&paths.db_file, &paths.thumbnails_dir) {
+                Ok(purged) => {
+                    for root in &purged {
+                        log::info!("Purged stale root: {root}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Stale root validation failed: {e}");
+                }
+            }
+
             Ok(paths)
         })
         .expect("failed to initialize application paths/database");
@@ -483,7 +540,11 @@ pub fn run() {
             list_active_scans,
             get_runtime_status,
             cleanup_ollama_models,
-            cancel_scan
+            cancel_scan,
+            remove_root,
+            list_roots,
+            load_user_config,
+            save_user_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

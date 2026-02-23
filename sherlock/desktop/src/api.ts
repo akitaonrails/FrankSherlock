@@ -3,6 +3,8 @@ import type {
   AppPaths,
   CleanupResult,
   DbStats,
+  PurgeResult,
+  RootInfo,
   RuntimeStatus,
   ScanJobStatus,
   SetupDownloadStatus,
@@ -53,4 +55,20 @@ export async function cleanupOllamaModels(): Promise<CleanupResult> {
 
 export async function cancelScan(jobId: number): Promise<boolean> {
   return invoke<boolean>("cancel_scan", { jobId });
+}
+
+export async function removeRoot(rootId: number): Promise<PurgeResult> {
+  return invoke<PurgeResult>("remove_root", { rootId });
+}
+
+export async function listRoots(): Promise<RootInfo[]> {
+  return invoke<RootInfo[]>("list_roots");
+}
+
+export async function loadUserConfig(): Promise<Record<string, unknown>> {
+  return invoke<Record<string, unknown>>("load_user_config");
+}
+
+export async function saveUserConfig(config: Record<string, unknown>): Promise<void> {
+  return invoke<void>("save_user_config", { config });
 }

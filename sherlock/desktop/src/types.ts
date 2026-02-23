@@ -101,3 +101,18 @@ export type AppPaths = {
   dbFile: string;
   cacheDir: string;
 };
+
+export type PurgeResult = {
+  filesRemoved: number;
+  jobsRemoved: number;
+  thumbsCleaned: number;
+};
+
+export type RootInfo = {
+  id: number;
+  rootPath: string;
+  rootName: string;
+  createdAt: number;
+  lastScanAt: number | null;
+  fileCount: number;
+};
