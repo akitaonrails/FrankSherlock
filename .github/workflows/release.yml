@@ -74,10 +74,48 @@ jobs:
         working-directory: sherlock/desktop/src-tauri
         run: cargo test
 
+      # macOS: Import code-signing certificate
+      - name: Import Apple certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode > $CERT_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $CERT_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      # macOS: Sign bundled dylibs before Tauri copies them into the app bundle
+      - name: Sign PDFium library for notarization
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            sherlock/desktop/src-tauri/lib/libpdfium.dylib
+
       - name: Build Tauri app
+        id: tauri-build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS code signing
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: sherlock/desktop
           tagName: ${{ github.ref_name }}
@@ -97,11 +135,36 @@ jobs:
             - [Ollama](https://ollama.com) must be installed and running locally
             - The app will prompt you to download the required model (`qwen2.5vl:7b`) on first launch
 
-            ### macOS first launch
-            The app is ad-hoc signed (no Apple Developer certificate). On first launch, **right-click the app → Open** to bypass Gatekeeper. You only need to do this once.
-
             ### Windows first launch
             The installer is not code-signed. Windows SmartScreen may show a warning — click **"More info"** then **"Run anyway"** to proceed. You only need to do this once.
+
+            ### Verify Linux AppImage (optional)
+            ```bash
+            gpg --recv-keys YOUR_KEY_FINGERPRINT
+            gpg --verify frank-sherlock_*_amd64.AppImage.asc
+            ```
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.rust_target }}
+
+      # Linux: GPG-sign the AppImage
+      - name: GPG-sign AppImage
+        if: runner.os == 'Linux'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for f in sherlock/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage/*.AppImage; do
+            gpg --batch --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --detach-sign --armor "$f"
+          done
+
+      - name: Upload AppImage signature
+        if: runner.os == 'Linux'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in sherlock/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage/*.asc; do
+            gh release upload "${{ github.ref_name }}" "$f" --clobber
+          done

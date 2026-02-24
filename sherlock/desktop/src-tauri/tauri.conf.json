@@ -54,7 +54,7 @@
     },
     "macOS": {
       "minimumSystemVersion": "10.15",
-      "signingIdentity": "-",
+      "signingIdentity": null,
       "entitlements": "./Entitlements.plist",
       "frameworks": ["./lib/libpdfium.dylib"]
     },

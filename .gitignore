@@ -35,5 +35,8 @@ uv.lock
 .npm-local/
 .cache-local/
 
+# Certificates and signing keys
+sherlock/certs/
+
 # Blog posts (drafts, not shipped)
 posts/
