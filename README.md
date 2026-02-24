@@ -30,16 +30,6 @@ Download the latest release from the [Releases page](https://github.com/akitaonr
 
 You also need [Ollama](https://ollama.com) installed and running (`ollama serve`). On first launch, the app prompts you to download the vision model if it isn't installed yet.
 
-### macOS: "app is damaged" error
-
-The release binaries are not signed with an Apple Developer certificate. macOS Gatekeeper will quarantine the app and show a misleading "damaged and can't be opened" error. To fix this, open Terminal and run:
-
-```bash
-xattr -cr /Applications/Frank\ Sherlock.app
-```
-
-Then open the app normally. Alternatively, right-click the `.app` and choose "Open" (instead of double-clicking) to bypass Gatekeeper on the first launch.
-
 ### Windows: SmartScreen warning
 
 The MSI installer is not signed with a code-signing certificate. Windows SmartScreen may block it with a "Windows protected your PC" warning. Click "More info" and then "Run anyway" to proceed with installation.
@@ -90,11 +80,11 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 npm run tauri:dev
 ## Tests
 
 ```bash
-# Rust (215 tests)
+# Rust (227 tests)
 cd sherlock/desktop/src-tauri
 cargo test
 
-# Frontend (175 tests)
+# Frontend (204 tests)
 cd sherlock/desktop
 npm run test
 ```
@@ -108,7 +98,7 @@ Covers classification JSON parsing, thumbnail generation, incremental scanning, 
 Built for large NAS directories with 100k+ files:
 
 1. **Discovery** -- walks the directory tree using only filesystem metadata (mtime, size). Files matching their previous scan are marked unchanged with zero file reads. Child root subtrees are skipped early via `filter_entry()`. Progress is reported live to the UI every 500 files.
-2. **Processing** -- only new and modified files go through classification and thumbnail generation. Moved files are detected by fingerprint and just update their path reference. Unchanged file markers are batched (200 per transaction) and checkpoints write every 50 files.
+2. **Processing** -- only new and modified files go through classification and thumbnail generation. Moved files are detected by fingerprint and just update their path reference. Unchanged file markers are batched (200 per transaction) and progress is checkpointed after every file.
 3. **Cleanup** -- files no longer on disk are soft-deleted, and their cached thumbnails are removed.
 
 Rescanning an unchanged 10k-image directory takes seconds.
