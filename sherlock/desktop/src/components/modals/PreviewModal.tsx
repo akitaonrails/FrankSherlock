@@ -111,7 +111,7 @@ export default function PreviewModal({
         {/* Single PDF preview */}
         {mode === "single-pdf" && (
           <div className="preview-pdf-wrap">
-            <PdfViewer filePath={pdfs[0].absPath} />
+            <PdfViewer filePath={pdfs[0].absPath} fileId={pdfs[0].id} />
           </div>
         )}
 
@@ -119,10 +119,10 @@ export default function PreviewModal({
         {mode === "dual-pdf" && (
           <div className="preview-split" data-testid="preview-split">
             <div className="preview-split-pane">
-              <PdfViewer filePath={pdfs[0].absPath} />
+              <PdfViewer filePath={pdfs[0].absPath} fileId={pdfs[0].id} />
             </div>
             <div className="preview-split-pane">
-              <PdfViewer filePath={pdfs[1].absPath} />
+              <PdfViewer filePath={pdfs[1].absPath} fileId={pdfs[1].id} />
             </div>
           </div>
         )}
@@ -131,7 +131,7 @@ export default function PreviewModal({
         {mode === "pdf-plus-image" && (
           <div className="preview-split" data-testid="preview-split">
             <div className="preview-split-pane">
-              <PdfViewer filePath={pdfs[0].absPath} />
+              <PdfViewer filePath={pdfs[0].absPath} fileId={pdfs[0].id} />
             </div>
             <div className="preview-split-pane preview-image-wrap">
               <img

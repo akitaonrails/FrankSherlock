@@ -8,9 +8,9 @@ use rusqlite_migration::{HookError, Migrations, M};
 use crate::error::{AppError, AppResult};
 use crate::models::{
     Album, DbStats, DuplicateFile, DuplicateGroup, DuplicatesResponse, ExistingFile, FileMetadata,
-    FileProperties, FileRecordUpsert, HealthCheckOutcome, ParsedQuery, PurgeResult, RootInfo,
-    ScanJobState, ScanJobStatus, SearchItem, SearchRequest, SearchResponse, SmartFolder, SortField,
-    SortOrder,
+    FileProperties, FileRecordUpsert, HealthCheckOutcome, ParsedQuery, PdfPassword,
+    ProtectedPdfInfo, PurgeResult, RootInfo, ScanJobState, ScanJobStatus, SearchItem,
+    SearchRequest, SearchResponse, SmartFolder, SortField, SortOrder,
 };
 use crate::query_parser::parse_query;
 
@@ -230,6 +230,17 @@ fn run_migrations(conn: &mut Connection) -> AppResult<()> {
             ALTER TABLE scan_jobs ADD COLUMN discovered_files INTEGER NOT NULL DEFAULT 0;
             "#,
         ),
+        // Migration 8: PDF passwords pool
+        M::up(
+            r#"
+            CREATE TABLE IF NOT EXISTS pdf_passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                password TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            );
+            "#,
+        ),
     ]);
 
     migrations
@@ -289,8 +300,7 @@ fn upsert_root_conn(conn: &Connection, root_path: &str) -> AppResult<i64> {
 
     // Check for existing roots with the same display name
     let conflicts: Vec<(i64, String)> = {
-        let mut stmt =
-            conn.prepare("SELECT id, root_path FROM roots WHERE root_name = ?1")?;
+        let mut stmt = conn.prepare("SELECT id, root_path FROM roots WHERE root_name = ?1")?;
         let rows = stmt.query_map(params![&base_name], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.filter_map(|r| r.ok()).collect()
     };
@@ -1344,6 +1354,54 @@ pub fn update_file_metadata(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn update_file_classification(
+    db_path: &Path,
+    file_id: i64,
+    media_type: &str,
+    description: &str,
+    extracted_text: &str,
+    canonical_mentions: &str,
+    confidence: f32,
+    lang_hint: &str,
+) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    let tx = conn.unchecked_transaction()?;
+    let now = now_epoch_secs();
+    tx.execute(
+        "UPDATE files SET media_type = ?2, description = ?3, extracted_text = ?4,
+                canonical_mentions = ?5, confidence = ?6, lang_hint = ?7, updated_at = ?8
+         WHERE id = ?1 AND deleted_at IS NULL",
+        params![
+            file_id,
+            media_type,
+            description,
+            extracted_text,
+            canonical_mentions,
+            confidence,
+            lang_hint,
+            now
+        ],
+    )?;
+    refresh_fts(&tx, file_id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn update_file_thumb_path_by_id(
+    db_path: &Path,
+    file_id: i64,
+    thumb_path: &str,
+) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    let now = now_epoch_secs();
+    conn.execute(
+        "UPDATE files SET thumb_path = ?1, updated_at = ?2 WHERE id = ?3",
+        params![thumb_path, now, file_id],
+    )?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
@@ -1900,6 +1958,95 @@ pub fn reorder_smart_folders(db_path: &Path, ids: &[i64]) -> AppResult<()> {
     }
     tx.commit()?;
     Ok(())
+}
+
+// ── PDF Passwords ───────────────────────────────────────────────────
+
+pub fn add_pdf_password(db_path: &Path, password: &str, label: &str) -> AppResult<PdfPassword> {
+    let conn = open_conn(db_path)?;
+    let now = now_epoch_secs();
+    conn.execute(
+        "INSERT OR IGNORE INTO pdf_passwords (password, label, created_at) VALUES (?1, ?2, ?3)",
+        params![password, label, now],
+    )?;
+    // Return the existing or newly inserted row
+    let mut stmt = conn
+        .prepare("SELECT id, password, label, created_at FROM pdf_passwords WHERE password = ?1")?;
+    let row = stmt.query_row(params![password], |row| {
+        Ok(PdfPassword {
+            id: row.get(0)?,
+            password: row.get(1)?,
+            label: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })?;
+    Ok(row)
+}
+
+pub fn delete_pdf_password(db_path: &Path, password_id: i64) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    conn.execute(
+        "DELETE FROM pdf_passwords WHERE id = ?1",
+        params![password_id],
+    )?;
+    Ok(())
+}
+
+pub fn list_pdf_passwords(db_path: &Path) -> AppResult<Vec<PdfPassword>> {
+    let conn = open_conn(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, password, label, created_at FROM pdf_passwords ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(PdfPassword {
+            id: row.get(0)?,
+            password: row.get(1)?,
+            label: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })?;
+    let mut passwords = Vec::new();
+    for row in rows {
+        passwords.push(row?);
+    }
+    Ok(passwords)
+}
+
+pub fn get_all_pdf_password_strings(db_path: &Path) -> AppResult<Vec<String>> {
+    let conn = open_conn(db_path)?;
+    let mut stmt = conn.prepare("SELECT password FROM pdf_passwords ORDER BY created_at DESC")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut passwords = Vec::new();
+    for row in rows {
+        passwords.push(row?);
+    }
+    Ok(passwords)
+}
+
+pub fn list_protected_pdfs(db_path: &Path) -> AppResult<Vec<ProtectedPdfInfo>> {
+    let conn = open_conn(db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT f.id, f.filename, f.rel_path, f.abs_path, r.root_path
+         FROM files f
+         JOIN roots r ON r.id = f.root_id
+         WHERE f.description = 'Password-protected PDF (skipped)'
+           AND f.deleted_at IS NULL
+         ORDER BY f.filename",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ProtectedPdfInfo {
+            id: row.get(0)?,
+            filename: row.get(1)?,
+            rel_path: row.get(2)?,
+            abs_path: row.get(3)?,
+            root_path: row.get(4)?,
+        })
+    })?;
+    let mut pdfs = Vec::new();
+    for row in rows {
+        pdfs.push(row?);
+    }
+    Ok(pdfs)
 }
 
 // ── Duplicates ──────────────────────────────────────────────────────
@@ -2971,11 +3118,11 @@ mod tests {
         init_database(&db_path).expect("init");
 
         let conn = open_conn(&db_path).expect("open");
-        // Verify user_version is set (8 migrations applied → version 8)
+        // Verify user_version is set (9 migrations applied → version 9)
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .expect("user_version");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         // Verify all tables exist
         let tables: Vec<String> = {
@@ -2994,6 +3141,7 @@ mod tests {
         assert!(tables.contains(&"albums".to_string()));
         assert!(tables.contains(&"album_files".to_string()));
         assert!(tables.contains(&"smart_folders".to_string()));
+        assert!(tables.contains(&"pdf_passwords".to_string()));
     }
 
     #[test]
@@ -3016,8 +3164,8 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .expect("user_version");
-        // We have 8 migrations (indices 0..7), so user_version should be 8
-        assert_eq!(version, 8);
+        // We have 9 migrations (indices 0..8), so user_version should be 9
+        assert_eq!(version, 9);
     }
 
     #[test]
@@ -3820,10 +3968,7 @@ mod tests {
 
     #[test]
     fn disambiguated_name_with_parent() {
-        assert_eq!(
-            disambiguated_name("/home/user/Pictures"),
-            "..user/Pictures"
-        );
+        assert_eq!(disambiguated_name("/home/user/Pictures"), "..user/Pictures");
     }
 
     #[test]
@@ -3893,5 +4038,102 @@ mod tests {
             )
             .expect("query");
         assert_eq!(name, "Pictures");
+    }
+
+    // ── PDF Password CRUD tests ─────────────────────────────────────
+
+    #[test]
+    fn pdf_password_crud_round_trip() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        // Add a password
+        let pw = add_pdf_password(&db_path, "secret123", "electricity bill").expect("add");
+        assert_eq!(pw.password, "secret123");
+        assert_eq!(pw.label, "electricity bill");
+
+        // List should contain it
+        let list = list_pdf_passwords(&db_path).expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].password, "secret123");
+
+        // Add duplicate should be idempotent
+        let pw2 = add_pdf_password(&db_path, "secret123", "different label").expect("add dup");
+        assert_eq!(pw2.id, pw.id); // Same row returned
+        let list2 = list_pdf_passwords(&db_path).expect("list");
+        assert_eq!(list2.len(), 1);
+
+        // Delete
+        delete_pdf_password(&db_path, pw.id).expect("delete");
+        let list3 = list_pdf_passwords(&db_path).expect("list");
+        assert!(list3.is_empty());
+    }
+
+    #[test]
+    fn get_all_pdf_password_strings_returns_just_strings() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+
+        add_pdf_password(&db_path, "alpha", "").expect("add");
+        add_pdf_password(&db_path, "beta", "").expect("add");
+
+        let strings = get_all_pdf_password_strings(&db_path).expect("strings");
+        assert_eq!(strings.len(), 2);
+        assert!(strings.contains(&"alpha".to_string()));
+        assert!(strings.contains(&"beta".to_string()));
+    }
+
+    #[test]
+    fn list_protected_pdfs_returns_correct_files() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/test").expect("root");
+
+        // Insert a password-protected PDF
+        let rec = FileRecordUpsert {
+            root_id,
+            rel_path: "secret.pdf".to_string(),
+            abs_path: "/tmp/test/secret.pdf".to_string(),
+            filename: "secret.pdf".to_string(),
+            media_type: "document".to_string(),
+            description: "Password-protected PDF (skipped)".to_string(),
+            extracted_text: String::new(),
+            canonical_mentions: String::new(),
+            confidence: 0.0,
+            lang_hint: String::new(),
+            mtime_ns: 1_700_000_000_000_000_000,
+            size_bytes: 5000,
+            fingerprint: "fp_secret".to_string(),
+            scan_marker: 1,
+            location_text: String::new(),
+            dhash: None,
+        };
+        upsert_file_record(&db_path, &rec).expect("upsert");
+
+        // Insert a normal file
+        let rec2 = FileRecordUpsert {
+            root_id,
+            rel_path: "normal.pdf".to_string(),
+            abs_path: "/tmp/test/normal.pdf".to_string(),
+            filename: "normal.pdf".to_string(),
+            media_type: "document".to_string(),
+            description: "A regular PDF".to_string(),
+            extracted_text: String::new(),
+            canonical_mentions: String::new(),
+            confidence: 0.8,
+            lang_hint: "en".to_string(),
+            mtime_ns: 1_700_000_000_000_000_000,
+            size_bytes: 8000,
+            fingerprint: "fp_normal".to_string(),
+            scan_marker: 1,
+            location_text: String::new(),
+            dhash: None,
+        };
+        upsert_file_record(&db_path, &rec2).expect("upsert");
+
+        let protected = list_protected_pdfs(&db_path).expect("list");
+        assert_eq!(protected.len(), 1);
+        assert_eq!(protected[0].filename, "secret.pdf");
+        assert_eq!(protected[0].root_path, "/tmp/test");
     }
 }

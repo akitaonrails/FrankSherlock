@@ -38,3 +38,35 @@
   color: var(--text-error, #f44);
   text-align: center;
 }
+
+.pdf-viewer-password {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-primary, #ccc);
+}
+
+.pdf-viewer-password p {
+  margin: 0 0 12px;
+  font-size: var(--font-size-sm, 0.85rem);
+}
+
+.pdf-viewer-password-form {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.pdf-viewer-password-form input {
+  padding: 4px 8px;
+  background: var(--input-bg, #2d2d2d);
+  border: 1px solid var(--border-color, #444);
+  color: var(--text-primary, #ccc);
+  border-radius: 3px;
+  font-size: var(--font-size-sm, 0.85rem);
+  width: 200px;
+}
+
+.pdf-viewer-password-form button {
+  padding: 4px 12px;
+  font-size: var(--font-size-sm, 0.85rem);
+}

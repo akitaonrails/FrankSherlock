@@ -213,6 +213,27 @@ export type SmartFolder = {
   createdAt: number;
 };
 
+export type PdfPassword = {
+  id: number;
+  password: string;
+  label: string;
+  createdAt: number;
+};
+
+export type ProtectedPdfInfo = {
+  id: number;
+  filename: string;
+  relPath: string;
+  absPath: string;
+  rootPath: string;
+};
+
+export type RetryProtectedPdfsResult = {
+  totalAttempted: number;
+  unlocked: number;
+  stillProtected: number;
+};
+
 export type DuplicateFile = {
   id: number;
   rootId: number;

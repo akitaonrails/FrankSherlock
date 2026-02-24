@@ -107,8 +107,14 @@ fn run_scan_job_internal(
 
     // Phase 1: Incremental discovery (metadata-only for unchanged files)
     let discovery_start = Instant::now();
-    let probes =
-        collect_image_probes_incremental(&root_path, &existing_by_path, &excluded_prefixes, db_path, job_id, cancel_flag)?;
+    let probes = collect_image_probes_incremental(
+        &root_path,
+        &existing_by_path,
+        &excluded_prefixes,
+        db_path,
+        job_id,
+        cancel_flag,
+    )?;
 
     // If cancelled during discovery, bail out
     if cancel_flag.map_or(false, |f| f.load(Ordering::Relaxed)) {
@@ -129,12 +135,25 @@ fn run_scan_job_internal(
     let total_files = probes.len() as u64;
     let start_index = resume_start_index(&probes, job.cursor_rel_path.as_deref());
 
-    let new_count = probes.iter().filter(|p| matches!(p.status, FileStatus::New)).count();
-    let mod_count = probes.iter().filter(|p| matches!(p.status, FileStatus::Modified)).count();
-    let unch_count = probes.iter().filter(|p| matches!(p.status, FileStatus::Unchanged)).count();
+    let new_count = probes
+        .iter()
+        .filter(|p| matches!(p.status, FileStatus::New))
+        .count();
+    let mod_count = probes
+        .iter()
+        .filter(|p| matches!(p.status, FileStatus::Modified))
+        .count();
+    let unch_count = probes
+        .iter()
+        .filter(|p| matches!(p.status, FileStatus::Unchanged))
+        .count();
     log::info!(
         "Scan job {}: discovery complete — {} files ({} new, {} modified, {} unchanged) in {:.1}s",
-        job_id, total_files, new_count, mod_count, unch_count,
+        job_id,
+        total_files,
+        new_count,
+        mod_count,
+        unch_count,
         discovery_start.elapsed().as_secs_f64()
     );
 
@@ -163,7 +182,8 @@ fn run_scan_job_internal(
 
     log::info!(
         "Scan job {}: starting processing from index {}",
-        job_id, start_index
+        job_id,
+        start_index
     );
 
     // Phase 2: Processing loop
@@ -200,7 +220,12 @@ fn run_scan_job_internal(
                 unchanged += 1;
                 if unchanged_batch.len() >= UNCHANGED_BATCH_SIZE {
                     let refs: Vec<&str> = unchanged_batch.iter().map(|s| s.as_str()).collect();
-                    db::touch_file_scan_markers_batch(db_path, job.root_id, &refs, job.scan_marker)?;
+                    db::touch_file_scan_markers_batch(
+                        db_path,
+                        job.root_id,
+                        &refs,
+                        job.scan_marker,
+                    )?;
                     unchanged_batch.clear();
                 }
             }
@@ -256,6 +281,7 @@ fn run_scan_job_internal(
                                 &ctx.thumbnails_dir,
                                 &probe.rel_path,
                                 &ctx.pdfium_lib_path,
+                                None,
                             )
                         } else {
                             thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path)
@@ -397,6 +423,15 @@ fn classify_and_thumbnail(
     let abs = Path::new(&probe.abs_path);
     let is_pdf = is_pdf_file(abs);
 
+    // For password-protected PDFs, try saved passwords from the DB
+    let pdf_password: Option<String> =
+        if is_pdf && crate::pdf::is_password_protected(abs, &ctx.pdfium_lib_path) {
+            let passwords = db::get_all_pdf_password_strings(&ctx.db_path).unwrap_or_default();
+            crate::pdf::try_passwords(abs, &ctx.pdfium_lib_path, &passwords)
+        } else {
+            None
+        };
+
     let classification = if is_pdf {
         classify::classify_pdf(
             abs,
@@ -405,6 +440,7 @@ fn classify_and_thumbnail(
             &ctx.surya_venv_dir,
             &ctx.surya_script,
             &ctx.pdfium_lib_path,
+            pdf_password.as_deref(),
         )
     } else {
         classify::classify_image(
@@ -422,6 +458,7 @@ fn classify_and_thumbnail(
             &ctx.thumbnails_dir,
             &probe.rel_path,
             &ctx.pdfium_lib_path,
+            pdf_password.as_deref(),
         )
     } else {
         thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path)
@@ -743,8 +780,15 @@ mod tests {
             .map(|f| (f.rel_path.clone(), f.clone()))
             .collect();
 
-        let probes = collect_image_probes_incremental(root_dir.path(), &existing_by_path, &[], &db_path, 0, None)
-            .expect("probes");
+        let probes = collect_image_probes_incremental(
+            root_dir.path(),
+            &existing_by_path,
+            &[],
+            &db_path,
+            0,
+            None,
+        )
+        .expect("probes");
         assert_eq!(probes.len(), 1);
         assert!(matches!(probes[0].status, FileStatus::Unchanged));
     }
@@ -786,8 +830,15 @@ mod tests {
 
         let existing_by_path: HashMap<String, ExistingFile> = HashMap::new();
         let dummy_db = root_dir.path().join("dummy.sqlite");
-        let probes = collect_image_probes_incremental(root_dir.path(), &existing_by_path, &[], &dummy_db, 0, None)
-            .expect("probes");
+        let probes = collect_image_probes_incremental(
+            root_dir.path(),
+            &existing_by_path,
+            &[],
+            &dummy_db,
+            0,
+            None,
+        )
+        .expect("probes");
         assert_eq!(probes.len(), 1);
         assert!(matches!(probes[0].status, FileStatus::New));
     }
@@ -810,15 +861,28 @@ mod tests {
         let dummy_db = root_dir.path().join("dummy.sqlite");
 
         // Without exclusions: both files found
-        let probes_all = collect_image_probes_incremental(root_dir.path(), &existing_by_path, &[], &dummy_db, 0, None)
-            .expect("probes all");
+        let probes_all = collect_image_probes_incremental(
+            root_dir.path(),
+            &existing_by_path,
+            &[],
+            &dummy_db,
+            0,
+            None,
+        )
+        .expect("probes all");
         assert_eq!(probes_all.len(), 2);
 
         // With child dir excluded: only parent file found
         let excluded = vec![child_dir.clone()];
-        let probes_filtered =
-            collect_image_probes_incremental(root_dir.path(), &existing_by_path, &excluded, &dummy_db, 0, None)
-                .expect("probes filtered");
+        let probes_filtered = collect_image_probes_incremental(
+            root_dir.path(),
+            &existing_by_path,
+            &excluded,
+            &dummy_db,
+            0,
+            None,
+        )
+        .expect("probes filtered");
         assert_eq!(probes_filtered.len(), 1);
         assert_eq!(probes_filtered[0].filename, "parent.jpg");
     }
@@ -854,8 +918,15 @@ mod tests {
 
         let existing_by_path: HashMap<String, ExistingFile> = HashMap::new();
         let dummy_db = root_dir.path().join("dummy.sqlite");
-        let probes = collect_image_probes_incremental(root_dir.path(), &existing_by_path, &[], &dummy_db, 0, None)
-            .expect("probes");
+        let probes = collect_image_probes_incremental(
+            root_dir.path(),
+            &existing_by_path,
+            &[],
+            &dummy_db,
+            0,
+            None,
+        )
+        .expect("probes");
 
         let filenames: Vec<&str> = probes.iter().map(|p| p.filename.as_str()).collect();
         assert!(filenames.contains(&"photo.jpg"));

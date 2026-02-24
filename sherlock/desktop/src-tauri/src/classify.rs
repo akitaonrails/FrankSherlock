@@ -754,15 +754,13 @@ pub fn classify_pdf(
     surya_venv: &Path,
     surya_script: &Path,
     pdfium_lib: &Path,
+    password: Option<&str>,
 ) -> ClassificationResult {
     log::info!("Classifying PDF: {}", pdf_path.display());
 
-    // Early exit for password-protected PDFs
-    if crate::pdf::is_password_protected(pdf_path, pdfium_lib) {
-        log::info!(
-            "Skipping password-protected PDF: {}",
-            pdf_path.display()
-        );
+    // Early exit for password-protected PDFs when no password is provided
+    if crate::pdf::is_password_protected(pdf_path, pdfium_lib) && password.is_none() {
+        log::info!("Skipping password-protected PDF: {}", pdf_path.display());
         return ClassificationResult {
             media_type: "document".to_string(),
             description: "Password-protected PDF (skipped)".to_string(),
@@ -774,7 +772,7 @@ pub fn classify_pdf(
     }
 
     // Step 1: Extract text from PDF
-    let (full_text, page_count) = match crate::pdf::extract_text(pdf_path, pdfium_lib) {
+    let (full_text, page_count) = match crate::pdf::extract_text(pdf_path, pdfium_lib, password) {
         Ok(result) => result,
         Err(e) => {
             log::warn!(
@@ -786,14 +784,14 @@ pub fn classify_pdf(
     };
 
     // Step 2: Render first content page for vision classification
-    let content_pages =
-        crate::pdf::find_content_pages(pdf_path, 1, pdfium_lib).unwrap_or_else(|_| vec![0]);
+    let content_pages = crate::pdf::find_content_pages(pdf_path, 1, pdfium_lib, password)
+        .unwrap_or_else(|_| vec![0]);
     let page_idx = content_pages.first().copied().unwrap_or(0);
 
     let _ = std::fs::create_dir_all(tmp_dir);
     let tmp_img_path = tmp_dir.join("_pdf_page.png");
 
-    let primary = match crate::pdf::render_page(pdf_path, page_idx, 200, pdfium_lib) {
+    let primary = match crate::pdf::render_page(pdf_path, page_idx, 200, pdfium_lib, password) {
         Ok(img) => {
             if let Err(e) = img.save(&tmp_img_path) {
                 log::warn!("Failed to save PDF page for classification: {e}");

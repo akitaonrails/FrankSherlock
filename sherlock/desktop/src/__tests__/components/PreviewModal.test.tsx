@@ -15,9 +15,10 @@ vi.mock("react-pdf", () => ({
   pdfjs: { GlobalWorkerOptions: { workerSrc: "" } },
 }));
 
-// Mock convertFileSrc for Tauri
+// Mock convertFileSrc and invoke for Tauri
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
+  invoke: vi.fn().mockResolvedValue([]),
 }));
 
 const item = {

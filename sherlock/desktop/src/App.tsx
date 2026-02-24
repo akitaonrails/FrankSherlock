@@ -27,6 +27,7 @@ import Titlebar from "./components/Titlebar/Titlebar";
 import Sidebar from "./components/Sidebar/Sidebar";
 import Content from "./components/Content/Content";
 import DuplicatesView from "./components/Content/DuplicatesView";
+import PdfPasswordsView from "./components/Content/PdfPasswordsView";
 import ContextMenu from "./components/Content/ContextMenu";
 import StatusBar from "./components/StatusBar/StatusBar";
 import ToastContainer from "./components/Toasts/ToastContainer";
@@ -90,6 +91,9 @@ export default function App() {
   const [showCreateSmartFolder, setShowCreateSmartFolder] = useState(false);
   const [pendingAlbumFileIds, setPendingAlbumFileIds] = useState<number[]>([]);
   const [activeSmartFolderId, setActiveSmartFolderId] = useState<number | null>(null);
+
+  /* ── PDF Passwords state ── */
+  const [pdfPasswordsMode, setPdfPasswordsMode] = useState(false);
 
   /* ── Duplicates state ── */
   const [duplicatesMode, setDuplicatesMode] = useState(false);
@@ -308,6 +312,7 @@ export default function App() {
 
   // Derive subtitle for titlebar based on current context
   const subtitle = useMemo(() => {
+    if (pdfPasswordsMode) return "PDF Passwords";
     if (duplicatesMode) return "Find Duplicates";
     if (activeAlbumName) return activeAlbumName;
     const sf = smartFolders.find(f => f.id === activeSmartFolderId);
@@ -494,6 +499,7 @@ export default function App() {
 
   /* ── Duplicates handlers ── */
   async function handleFindDuplicates(threshold?: number | null) {
+    setPdfPasswordsMode(false);
     setDuplicatesMode(true);
     setDuplicatesLoading(true);
     setDuplicatesSelected(new Set());
@@ -599,6 +605,7 @@ export default function App() {
     setQuery(q);
     setActiveSmartFolderId(null);
     setDuplicatesMode(false);
+    setPdfPasswordsMode(false);
   }
 
   async function handleDeleteAlbum(album: Album) {
@@ -655,6 +662,7 @@ export default function App() {
     setQuery(folder.query);
     setActiveSmartFolderId(folder.id);
     setDuplicatesMode(false);
+    setPdfPasswordsMode(false);
   }
 
   async function handleDeleteSmartFolder(folder: SmartFolder) {
@@ -848,7 +856,7 @@ export default function App() {
           smartFolders={smartFolders}
           activeAlbumName={activeAlbumName}
           activeSmartFolderId={activeSmartFolderId}
-          onSelectRoot={(id) => { setSelectedRootId(id); setDuplicatesMode(false); }}
+          onSelectRoot={(id) => { setSelectedRootId(id); setDuplicatesMode(false); setPdfPasswordsMode(false); }}
           onDeleteRoot={(root) => setConfirmDeleteRoot(root)}
           onRescanRoot={(root) => scanManager.onRescanRoot(root, setup, readOnly)}
           onCopyRootPath={(root) => {
@@ -866,9 +874,16 @@ export default function App() {
           onReorderAlbums={handleReorderAlbums}
           onReorderSmartFolders={handleReorderSmartFolders}
           onFindDuplicates={handleFindDuplicates}
+          onOpenPdfPasswords={() => { setPdfPasswordsMode(true); setDuplicatesMode(false); }}
         />
 
-        {duplicatesMode && duplicatesData ? (
+        {pdfPasswordsMode ? (
+          <PdfPasswordsView
+            onBack={() => setPdfPasswordsMode(false)}
+            onNotice={setNotice}
+            onError={setError}
+          />
+        ) : duplicatesMode && duplicatesData ? (
           <DuplicatesView
             data={duplicatesData}
             loading={duplicatesLoading}

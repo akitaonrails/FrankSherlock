@@ -20,9 +20,10 @@ use std::sync::{Arc, Mutex};
 use config::{prepare_dirs, resolve_paths, AppPaths};
 use error::AppError;
 use models::{
-    Album, DeleteFilesResult, DuplicatesResponse, HealthCheckOutcome, HealthStatus, PurgeResult,
-    RenameFileResult, RootInfo, RuntimeStatus, ScanJobStatus, SearchRequest, SearchResponse,
-    SetupDownloadStatus, SetupStatus, SmartFolder, VenvProvisionStatus,
+    Album, DeleteFilesResult, DuplicatesResponse, HealthCheckOutcome, HealthStatus, PdfPassword,
+    ProtectedPdfInfo, PurgeResult, RenameFileResult, RetryProtectedPdfsResult, RootInfo,
+    RuntimeStatus, ScanJobStatus, SearchRequest, SearchResponse, SetupDownloadStatus, SetupStatus,
+    SmartFolder, VenvProvisionStatus,
 };
 use tauri::Manager;
 use tauri::State;
@@ -601,6 +602,182 @@ fn save_user_config(config: serde_json::Value, state: State<'_, AppState>) -> Re
     config::save_user_config(&config).map_err(|e| e.to_string())
 }
 
+// ── PDF Password commands ────────────────────────────────────────────
+
+#[tauri::command]
+fn add_pdf_password(
+    password: String,
+    label: String,
+    state: State<'_, AppState>,
+) -> Result<PdfPassword, String> {
+    require_writable(state.inner())?;
+    db::add_pdf_password(&state.paths.db_file, &password, &label).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_pdf_password(password_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    require_writable(state.inner())?;
+    db::delete_pdf_password(&state.paths.db_file, password_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_pdf_passwords(state: State<'_, AppState>) -> Result<Vec<PdfPassword>, String> {
+    db::list_pdf_passwords(&state.paths.db_file).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_protected_pdfs(state: State<'_, AppState>) -> Result<Vec<ProtectedPdfInfo>, String> {
+    db::list_protected_pdfs(&state.paths.db_file).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn retry_protected_pdfs(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<RetryProtectedPdfsResult, String> {
+    let db_path = state.paths.db_file.clone();
+    let thumbnails_dir = state.paths.thumbnails_dir.clone();
+    let scan_ctx = build_scan_context(state.inner(), &app_handle);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let protected = db::list_protected_pdfs(&db_path).map_err(|e| e.to_string())?;
+        let passwords = db::get_all_pdf_password_strings(&db_path).map_err(|e| e.to_string())?;
+
+        if passwords.is_empty() || protected.is_empty() {
+            return Ok(RetryProtectedPdfsResult {
+                total_attempted: protected.len() as u64,
+                unlocked: 0,
+                still_protected: protected.len() as u64,
+            });
+        }
+
+        let total_attempted = protected.len() as u64;
+        let mut unlocked = 0u64;
+
+        for pdf in &protected {
+            let abs = std::path::Path::new(&pdf.abs_path);
+            if !abs.exists() {
+                continue;
+            }
+
+            if let Some(pw) = crate::pdf::try_passwords(abs, &scan_ctx.pdfium_lib_path, &passwords)
+            {
+                // Re-classify with the working password
+                let classification = classify::classify_pdf(
+                    abs,
+                    &scan_ctx.model,
+                    &scan_ctx.tmp_dir,
+                    &scan_ctx.surya_venv_dir,
+                    &scan_ctx.surya_script,
+                    &scan_ctx.pdfium_lib_path,
+                    Some(&pw),
+                );
+
+                // Generate thumbnail
+                let thumb_result = thumbnail::generate_pdf_thumbnail(
+                    abs,
+                    &thumbnails_dir,
+                    &pdf.rel_path,
+                    &scan_ctx.pdfium_lib_path,
+                    Some(&pw),
+                );
+
+                // Update the DB record with actual classification
+                let _ = db::update_file_classification(
+                    &db_path,
+                    pdf.id,
+                    &classification.media_type,
+                    &classification.description,
+                    &classification.extracted_text,
+                    &classification.canonical_mentions,
+                    classification.confidence,
+                    &classification.lang_hint,
+                );
+
+                if let Some(ref tr) = thumb_result {
+                    let _ = db::update_file_thumb_path_by_id(&db_path, pdf.id, &tr.path);
+                }
+
+                unlocked += 1;
+            }
+        }
+
+        Ok(RetryProtectedPdfsResult {
+            total_attempted,
+            unlocked,
+            still_protected: total_attempted - unlocked,
+        })
+    })
+    .await
+    .map_err(|e| AppError::Join(e.to_string()).to_string())?
+}
+
+#[tauri::command]
+async fn reclassify_pdf(
+    file_id: i64,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<bool, String> {
+    let db_path = state.paths.db_file.clone();
+    let thumbnails_dir = state.paths.thumbnails_dir.clone();
+    let scan_ctx = build_scan_context(state.inner(), &app_handle);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let (abs_path, rel_path, _) =
+            db::get_file_path_info(&db_path, file_id).map_err(|e| e.to_string())?;
+        let abs = std::path::Path::new(&abs_path);
+
+        if !abs.exists() {
+            return Ok(false);
+        }
+
+        let passwords = db::get_all_pdf_password_strings(&db_path).map_err(|e| e.to_string())?;
+        let working_pw = crate::pdf::try_passwords(abs, &scan_ctx.pdfium_lib_path, &passwords);
+
+        if working_pw.is_none() && crate::pdf::is_password_protected(abs, &scan_ctx.pdfium_lib_path)
+        {
+            return Ok(false);
+        }
+
+        let classification = classify::classify_pdf(
+            abs,
+            &scan_ctx.model,
+            &scan_ctx.tmp_dir,
+            &scan_ctx.surya_venv_dir,
+            &scan_ctx.surya_script,
+            &scan_ctx.pdfium_lib_path,
+            working_pw.as_deref(),
+        );
+
+        let thumb_result = thumbnail::generate_pdf_thumbnail(
+            abs,
+            &thumbnails_dir,
+            &rel_path,
+            &scan_ctx.pdfium_lib_path,
+            working_pw.as_deref(),
+        );
+
+        let _ = db::update_file_classification(
+            &db_path,
+            file_id,
+            &classification.media_type,
+            &classification.description,
+            &classification.extracted_text,
+            &classification.canonical_mentions,
+            classification.confidence,
+            &classification.lang_hint,
+        );
+
+        if let Some(ref tr) = thumb_result {
+            let _ = db::update_file_thumb_path_by_id(&db_path, file_id, &tr.path);
+        }
+
+        Ok(true)
+    })
+    .await
+    .map_err(|e| AppError::Join(e.to_string()).to_string())?
+}
+
 fn compute_setup_status(app_state: &AppState) -> SetupStatus {
     let (model_tag, model_tier, model_reason) = llm::recommended_model(&app_state.gpu_info);
     let required_models = vec![model_tag.to_string()];
@@ -970,7 +1147,13 @@ pub fn run() {
             list_smart_folders,
             reorder_roots,
             reorder_albums,
-            reorder_smart_folders
+            reorder_smart_folders,
+            add_pdf_password,
+            delete_pdf_password,
+            list_pdf_passwords,
+            list_protected_pdfs,
+            retry_protected_pdfs,
+            reclassify_pdf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-import type { Album, DuplicateFile, DuplicateGroup, DuplicatesResponse, RootInfo, ScanJobStatus, SearchItem, SmartFolder } from "../types";
+import type { Album, DuplicateFile, DuplicateGroup, DuplicatesResponse, PdfPassword, ProtectedPdfInfo, RootInfo, ScanJobStatus, SearchItem, SmartFolder } from "../types";
 
 export const mockSearchItem: SearchItem = {
   id: 1,
@@ -103,4 +103,19 @@ export const mockDuplicatesResponse: DuplicatesResponse = {
   totalDuplicateFiles: 1,
   totalWastedBytes: 5000,
   groups: [mockDuplicateGroup],
+};
+
+export const mockPdfPassword: PdfPassword = {
+  id: 1,
+  password: "secret123",
+  label: "electricity bill",
+  createdAt: 1700000000,
+};
+
+export const mockProtectedPdf: ProtectedPdfInfo = {
+  id: 100,
+  filename: "bill.pdf",
+  relPath: "docs/bill.pdf",
+  absPath: "/home/user/docs/bill.pdf",
+  rootPath: "/home/user/docs",
 };

@@ -120,6 +120,7 @@ pub fn generate_pdf_thumbnail(
     thumb_dir: &Path,
     rel_path: &str,
     pdfium_lib: &Path,
+    password: Option<&str>,
 ) -> Option<ThumbnailResult> {
     let stem = normalize_rel_path(&Path::new(rel_path).with_extension("jpg").to_string_lossy());
     let thumb_path = thumb_dir.join(&stem);
@@ -150,13 +151,13 @@ pub fn generate_pdf_thumbnail(
         }
     }
 
-    // Skip password-protected PDFs
-    if crate::pdf::is_password_protected(pdf_path, pdfium_lib) {
+    // Skip password-protected PDFs when no password is provided
+    if crate::pdf::is_password_protected(pdf_path, pdfium_lib) && password.is_none() {
         return None;
     }
 
     // Find up to 2 non-blank content pages
-    let content_pages = match crate::pdf::find_content_pages(pdf_path, 2, pdfium_lib) {
+    let content_pages = match crate::pdf::find_content_pages(pdf_path, 2, pdfium_lib, password) {
         Ok(pages) => pages,
         Err(e) => {
             log::warn!(
@@ -174,7 +175,7 @@ pub fn generate_pdf_thumbnail(
     // Render each content page at moderate resolution (150px width target)
     let mut page_images: Vec<image::DynamicImage> = Vec::new();
     for &page_idx in &content_pages {
-        match crate::pdf::render_page(pdf_path, page_idx, 96, pdfium_lib) {
+        match crate::pdf::render_page(pdf_path, page_idx, 96, pdfium_lib, password) {
             Ok(img) => {
                 // Scale page to ~150px width
                 let target_w = 150u32;

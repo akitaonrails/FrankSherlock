@@ -8,8 +8,11 @@ import type {
   FileMetadata,
   FileProperties,
   HealthStatus,
+  PdfPassword,
+  ProtectedPdfInfo,
   PurgeResult,
   RenameFileResult,
+  RetryProtectedPdfsResult,
   RootInfo,
   RuntimeStatus,
   ScanJobStatus,
@@ -182,4 +185,30 @@ export async function reorderAlbums(ids: number[]): Promise<void> {
 
 export async function reorderSmartFolders(ids: number[]): Promise<void> {
   return invoke<void>("reorder_smart_folders", { ids });
+}
+
+// ── PDF Passwords ───────────────────────────────────────────────────
+
+export async function addPdfPassword(password: string, label: string): Promise<PdfPassword> {
+  return invoke<PdfPassword>("add_pdf_password", { password, label });
+}
+
+export async function deletePdfPassword(passwordId: number): Promise<void> {
+  return invoke<void>("delete_pdf_password", { passwordId });
+}
+
+export async function listPdfPasswords(): Promise<PdfPassword[]> {
+  return invoke<PdfPassword[]>("list_pdf_passwords");
+}
+
+export async function listProtectedPdfs(): Promise<ProtectedPdfInfo[]> {
+  return invoke<ProtectedPdfInfo[]>("list_protected_pdfs");
+}
+
+export async function retryProtectedPdfs(): Promise<RetryProtectedPdfsResult> {
+  return invoke<RetryProtectedPdfsResult>("retry_protected_pdfs");
+}
+
+export async function reclassifyPdf(fileId: number): Promise<boolean> {
+  return invoke<boolean>("reclassify_pdf", { fileId });
 }

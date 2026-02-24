@@ -13,10 +13,14 @@ fn load_pdfium(lib_dir: &Path) -> AppResult<Pdfium> {
 
 /// Extract all text from a PDF, concatenating pages with "\n---\n" separators.
 /// Returns (full_text, page_count).
-pub fn extract_text(pdf_path: &Path, pdfium_lib: &Path) -> AppResult<(String, u32)> {
+pub fn extract_text(
+    pdf_path: &Path,
+    pdfium_lib: &Path,
+    password: Option<&str>,
+) -> AppResult<(String, u32)> {
     let pdfium = load_pdfium(pdfium_lib)?;
     let doc = pdfium
-        .load_pdf_from_file(pdf_path, None)
+        .load_pdf_from_file(pdf_path, password)
         .map_err(|e| AppError::Config(format!("Failed to open PDF {}: {e}", pdf_path.display())))?;
 
     let page_count = doc.pages().len() as u32;
@@ -47,10 +51,11 @@ pub fn render_page(
     page_index: u32,
     dpi: u16,
     pdfium_lib: &Path,
+    password: Option<&str>,
 ) -> AppResult<image::DynamicImage> {
     let pdfium = load_pdfium(pdfium_lib)?;
     let doc = pdfium
-        .load_pdf_from_file(pdf_path, None)
+        .load_pdf_from_file(pdf_path, password)
         .map_err(|e| AppError::Config(format!("Failed to open PDF: {e}")))?;
 
     let page = doc
@@ -72,10 +77,15 @@ pub fn render_page(
 
 /// Find first N non-blank page indices. A page is "blank" if rendering at low DPI
 /// produces mean brightness > 250. Returns indices of first `count` content pages.
-pub fn find_content_pages(pdf_path: &Path, count: usize, pdfium_lib: &Path) -> AppResult<Vec<u32>> {
+pub fn find_content_pages(
+    pdf_path: &Path,
+    count: usize,
+    pdfium_lib: &Path,
+    password: Option<&str>,
+) -> AppResult<Vec<u32>> {
     let pdfium = load_pdfium(pdfium_lib)?;
     let doc = pdfium
-        .load_pdf_from_file(pdf_path, None)
+        .load_pdf_from_file(pdf_path, password)
         .map_err(|e| AppError::Config(format!("Failed to open PDF: {e}")))?;
 
     let page_count = doc.pages().len() as u32;
@@ -156,12 +166,23 @@ pub fn is_password_protected(pdf_path: &Path, pdfium_lib: &Path) -> bool {
 
 /// Get the page count of a PDF without extracting text.
 #[allow(dead_code)]
-pub fn page_count(pdf_path: &Path, pdfium_lib: &Path) -> AppResult<u32> {
+pub fn page_count(pdf_path: &Path, pdfium_lib: &Path, password: Option<&str>) -> AppResult<u32> {
     let pdfium = load_pdfium(pdfium_lib)?;
     let doc = pdfium
-        .load_pdf_from_file(pdf_path, None)
+        .load_pdf_from_file(pdf_path, password)
         .map_err(|e| AppError::Config(format!("Failed to open PDF: {e}")))?;
     Ok(doc.pages().len() as u32)
+}
+
+/// Try each password against a PDF. Returns the first that works, or None.
+pub fn try_passwords(pdf_path: &Path, pdfium_lib: &Path, passwords: &[String]) -> Option<String> {
+    let pdfium = load_pdfium(pdfium_lib).ok()?;
+    for pw in passwords {
+        if pdfium.load_pdf_from_file(pdf_path, Some(pw)).is_ok() {
+            return Some(pw.clone());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -205,5 +226,20 @@ mod tests {
         let fake_lib = std::path::Path::new("/nonexistent/pdfium");
         // Should return false when PDFium library can't be loaded
         assert!(!is_password_protected(&fake_pdf, fake_lib));
+    }
+
+    #[test]
+    fn try_passwords_returns_none_for_missing_pdfium() {
+        let fake_pdf = std::env::temp_dir().join("fake.pdf");
+        let fake_lib = std::path::Path::new("/nonexistent/pdfium");
+        let passwords = vec!["secret".to_string(), "12345".to_string()];
+        assert!(try_passwords(&fake_pdf, fake_lib, &passwords).is_none());
+    }
+
+    #[test]
+    fn try_passwords_returns_none_for_empty_list() {
+        let fake_pdf = std::env::temp_dir().join("fake.pdf");
+        let fake_lib = std::path::Path::new("/nonexistent/pdfium");
+        assert!(try_passwords(&fake_pdf, fake_lib, &[]).is_none());
     }
 }

@@ -366,6 +366,33 @@ pub struct RenameFileResult {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PdfPassword {
+    pub id: i64,
+    pub password: String,
+    pub label: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtectedPdfInfo {
+    pub id: i64,
+    pub filename: String,
+    pub rel_path: String,
+    pub abs_path: String,
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryProtectedPdfsResult {
+    pub total_attempted: u64,
+    pub unlocked: u64,
+    pub still_protected: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DuplicateFile {
     pub id: i64,
     pub root_id: i64,

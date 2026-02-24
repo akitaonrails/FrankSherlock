@@ -32,6 +32,7 @@ type SidebarProps = {
   onReorderAlbums?: (ids: number[]) => void;
   onReorderSmartFolders?: (ids: number[]) => void;
   onFindDuplicates?: () => void;
+  onOpenPdfPasswords?: () => void;
 };
 
 export default function Sidebar({
@@ -41,6 +42,7 @@ export default function Sidebar({
   onCancelScan, onResumeScan,
   onSelectAlbum, onDeleteAlbum, onSelectSmartFolder, onDeleteSmartFolder,
   onReorderRoots, onReorderAlbums, onReorderSmartFolders, onFindDuplicates,
+  onOpenPdfPasswords,
 }: SidebarProps) {
   const rootsDrag = useDragReorder({ items: roots, onReorder: onReorderRoots ?? (() => {}), readOnly });
   const albumsDrag = useDragReorder({ items: albums, onReorder: onReorderAlbums ?? (() => {}), readOnly });
@@ -134,18 +136,30 @@ export default function Sidebar({
             </div>
           </>
         )}
-        {onFindDuplicates && (
+        {(onFindDuplicates || onOpenPdfPasswords) && (
           <>
             <div className="sidebar-section"><span>Tools</span></div>
             <div className="sidebar-tool-list">
-              <button
-                type="button"
-                className="sidebar-tool-btn"
-                onClick={onFindDuplicates}
-                title="Find duplicate files across all folders"
-              >
-                Find Duplicates
-              </button>
+              {onFindDuplicates && (
+                <button
+                  type="button"
+                  className="sidebar-tool-btn"
+                  onClick={onFindDuplicates}
+                  title="Find duplicate files across all folders"
+                >
+                  Find Duplicates
+                </button>
+              )}
+              {onOpenPdfPasswords && (
+                <button
+                  type="button"
+                  className="sidebar-tool-btn"
+                  onClick={onOpenPdfPasswords}
+                  title="Manage passwords for protected PDFs"
+                >
+                  PDF Passwords
+                </button>
+              )}
             </div>
           </>
         )}
