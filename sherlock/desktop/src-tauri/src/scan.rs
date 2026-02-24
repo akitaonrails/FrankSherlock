@@ -205,7 +205,7 @@ fn run_scan_job_internal(
 
                         // Regenerate thumbnail at new path if old one existed
                         let abs = Path::new(&probe.abs_path);
-                        let thumb = if is_pdf_file(abs) {
+                        let thumb_result = if is_pdf_file(abs) {
                             thumbnail::generate_pdf_thumbnail(
                                 abs,
                                 &ctx.thumbnails_dir,
@@ -215,8 +215,13 @@ fn run_scan_job_internal(
                         } else {
                             thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path)
                         };
-                        if let Some(ref t) = thumb {
-                            db::update_file_thumb_path(db_path, job.root_id, &probe.rel_path, t)?;
+                        if let Some(ref tr) = thumb_result {
+                            db::update_file_thumb_path(
+                                db_path,
+                                job.root_id,
+                                &probe.rel_path,
+                                &tr.path,
+                            )?;
                         }
 
                         processed_files += 1;
@@ -318,6 +323,7 @@ struct ClassifyAndThumbResult {
     classification: ClassificationResult,
     thumb_path: Option<String>,
     location_text: String,
+    dhash: Option<u64>,
 }
 
 fn is_pdf_file(path: &Path) -> bool {
@@ -352,7 +358,7 @@ fn classify_and_thumbnail(
         )
     };
 
-    let thumb_path = if is_pdf {
+    let thumb_result = if is_pdf {
         thumbnail::generate_pdf_thumbnail(
             abs,
             &ctx.thumbnails_dir,
@@ -361,6 +367,11 @@ fn classify_and_thumbnail(
         )
     } else {
         thumbnail::generate_thumbnail(abs, &ctx.thumbnails_dir, &probe.rel_path)
+    };
+
+    let (thumb_path, dhash) = match thumb_result {
+        Some(tr) => (Some(tr.path), tr.dhash),
+        None => (None, None),
     };
 
     let exif_location = if is_pdf {
@@ -373,6 +384,7 @@ fn classify_and_thumbnail(
         classification,
         thumb_path,
         location_text: exif_location.location_text,
+        dhash,
     }
 }
 
@@ -500,6 +512,7 @@ fn probe_to_record(
         fingerprint: probe.fingerprint.clone(),
         scan_marker,
         location_text: result.location_text.clone(),
+        dhash: result.dhash.map(|h| h as i64),
     }
 }
 
@@ -642,6 +655,7 @@ mod tests {
             fingerprint: fp,
             scan_marker: 1,
             location_text: String::new(),
+            dhash: None,
         };
         db::upsert_file_record(&db_path, &rec).expect("upsert");
 

@@ -197,6 +197,73 @@
   margin-top: 2px;
 }
 
+/* ── Near-duplicate controls ─────────────────────────────── */
+.near-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.near-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.near-threshold-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.near-threshold-control input[type="range"] {
+  width: 80px;
+  accent-color: var(--accent);
+}
+
+.near-threshold-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  min-width: 30px;
+}
+
+/* ── Group type badges ──────────────────────────────────── */
+.dup-type-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dup-type-badge-exact {
+  background: rgba(0, 122, 204, 0.2);
+  color: var(--accent);
+}
+
+.dup-type-badge-near {
+  background: rgba(217, 158, 43, 0.2);
+  color: #d49e2b;
+}
+
+/* Near-group amber border */
+.dup-group[data-group-type="near"] {
+  border-color: rgba(217, 158, 43, 0.4);
+}
+
+.dup-similarity-label {
+  color: #d49e2b;
+}
+
+.dup-file-similarity {
+  color: #d49e2b;
+  font-weight: 500;
+}
+
 /* ── Keeper badge ────────────────────────────────────────── */
 .dup-keeper-badge {
   flex-shrink: 0;

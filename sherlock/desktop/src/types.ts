@@ -224,6 +224,8 @@ export type DuplicateFile = {
   sizeBytes: number;
   thumbnailPath?: string | null;
   isKeeper: boolean;
+  similarityScore?: number | null;
+  groupType: string;
 };
 
 export type DuplicateGroup = {
@@ -232,6 +234,8 @@ export type DuplicateGroup = {
   totalSizeBytes: number;
   wastedBytes: number;
   files: DuplicateFile[];
+  groupType: string;
+  avgSimilarity?: number | null;
 };
 
 export type DuplicatesResponse = {

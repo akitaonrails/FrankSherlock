@@ -97,6 +97,8 @@ export default function App() {
   const [duplicatesData, setDuplicatesData] = useState<DuplicatesResponse | null>(null);
   const [duplicatesLoading, setDuplicatesLoading] = useState(false);
   const [duplicatesSelected, setDuplicatesSelected] = useState<Set<number>>(new Set());
+  const [nearEnabled, setNearEnabled] = useState(false);
+  const [nearThreshold, setNearThreshold] = useState(0.85);
 
   /* ── Refs ── */
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -450,7 +452,7 @@ export default function App() {
       if (duplicatesMode) {
         setDuplicatesSelected(new Set());
         try {
-          const resp = await findDuplicates();
+          const resp = await findDuplicates([], nearEnabled ? nearThreshold : null);
           setDuplicatesData(resp);
         } catch { /* ignore */ }
       }
@@ -492,13 +494,16 @@ export default function App() {
   }
 
   /* ── Duplicates handlers ── */
-  async function handleFindDuplicates() {
+  async function handleFindDuplicates(threshold?: number | null) {
     setDuplicatesMode(true);
     setDuplicatesLoading(true);
     setDuplicatesSelected(new Set());
     setDuplicatesData(null);
     try {
-      const resp = await findDuplicates();
+      // Guard: when called as an onClick handler, the first arg is a MouseEvent
+      const safeThreshold = typeof threshold === "number" ? threshold : null;
+      const effectiveThreshold = safeThreshold ?? (nearEnabled ? nearThreshold : null);
+      const resp = await findDuplicates([], effectiveThreshold);
       setDuplicatesData(resp);
     } catch (err) {
       setError(errorMessage(err));
@@ -872,6 +877,16 @@ export default function App() {
             data={duplicatesData}
             loading={duplicatesLoading}
             selected={duplicatesSelected}
+            nearEnabled={nearEnabled}
+            nearThreshold={nearThreshold}
+            onNearEnabledChange={(enabled) => {
+              setNearEnabled(enabled);
+              handleFindDuplicates(enabled ? nearThreshold : null);
+            }}
+            onNearThresholdChange={(value) => {
+              setNearThreshold(value);
+              handleFindDuplicates(value);
+            }}
             onToggleFile={handleDuplicatesToggleFile}
             onSelectAllDuplicates={handleDuplicatesSelectAll}
             onDeselectAll={() => setDuplicatesSelected(new Set())}

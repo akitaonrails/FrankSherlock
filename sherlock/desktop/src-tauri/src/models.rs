@@ -253,6 +253,7 @@ pub struct FileRecordUpsert {
     pub fingerprint: String,
     pub scan_marker: i64,
     pub location_text: String,
+    pub dhash: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -376,6 +377,8 @@ pub struct DuplicateFile {
     pub size_bytes: i64,
     pub thumbnail_path: Option<String>,
     pub is_keeper: bool,
+    pub similarity_score: Option<f32>,
+    pub group_type: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -386,6 +389,8 @@ pub struct DuplicateGroup {
     pub total_size_bytes: i64,
     pub wasted_bytes: i64,
     pub files: Vec<DuplicateFile>,
+    pub group_type: String,
+    pub avg_similarity: Option<f32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

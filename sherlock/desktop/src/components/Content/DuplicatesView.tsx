@@ -8,6 +8,10 @@ type Props = {
   data: DuplicatesResponse;
   loading: boolean;
   selected: Set<number>;
+  nearEnabled: boolean;
+  nearThreshold: number;
+  onNearEnabledChange: (enabled: boolean) => void;
+  onNearThresholdChange: (value: number) => void;
   onToggleFile: (fileId: number) => void;
   onSelectAllDuplicates: () => void;
   onDeselectAll: () => void;
@@ -24,6 +28,7 @@ function formatDate(mtimeNs: number): string {
 
 export default function DuplicatesView({
   data, loading, selected,
+  nearEnabled, nearThreshold, onNearEnabledChange, onNearThresholdChange,
   onToggleFile, onSelectAllDuplicates, onDeselectAll, onDeleteSelected,
   onBack, onSelectGroupDuplicates, onPreviewFile,
 }: Props) {
@@ -35,6 +40,26 @@ export default function DuplicatesView({
           {" "}<strong>{data.totalDuplicateFiles}</strong> duplicate{data.totalDuplicateFiles !== 1 ? "s" : ""},
           {" "}<strong>{formatBytes(data.totalWastedBytes)}</strong> wasted
         </div>
+        <label className="near-toggle" title="Include visually similar files (not just exact copies)">
+          <input
+            type="checkbox"
+            checked={nearEnabled}
+            onChange={(e) => onNearEnabledChange(e.target.checked)}
+          />
+          Near-duplicates
+        </label>
+        {nearEnabled && (
+          <div className="near-threshold-control">
+            <input
+              type="range"
+              min={70}
+              max={99}
+              value={Math.round(nearThreshold * 100)}
+              onChange={(e) => onNearThresholdChange(Number(e.target.value) / 100)}
+            />
+            <span className="near-threshold-label">{Math.round(nearThreshold * 100)}%</span>
+          </div>
+        )}
         {selected.size > 0 ? (
           <button type="button" onClick={onDeselectAll}>Deselect all</button>
         ) : (
@@ -83,10 +108,18 @@ function GroupCard({
   onPreviewFile: (file: DuplicateFile) => void;
 }) {
   return (
-    <div className="dup-group">
+    <div className="dup-group" data-group-type={group.groupType}>
       <div className="dup-group-header">
+        <span className={`dup-type-badge dup-type-badge-${group.groupType}`}>
+          {group.groupType === "exact" ? "EXACT" : "NEAR"}
+        </span>
         <div className="dup-group-info">
           <strong>{group.fileCount}</strong> copies &middot; {formatBytes(group.wastedBytes)} wasted
+          {group.groupType === "near" && group.avgSimilarity != null && (
+            <span className="dup-similarity-label">
+              {" "}&middot; {Math.round(group.avgSimilarity * 100)}% similar
+            </span>
+          )}
         </div>
         <button type="button" onClick={() => onSelectGroupDuplicates(group)}>
           Select duplicates
@@ -141,6 +174,9 @@ function FileRow({
           <span>{file.rootPath}</span>
           <span>{formatBytes(file.sizeBytes)}</span>
           <span>{formatDate(file.mtimeNs)}</span>
+          {file.groupType === "near" && file.similarityScore != null && !file.isKeeper && (
+            <span className="dup-file-similarity">{Math.round(file.similarityScore * 100)}%</span>
+          )}
         </div>
       </div>
       {file.isKeeper && <span className="dup-keeper-badge">KEEP</span>}

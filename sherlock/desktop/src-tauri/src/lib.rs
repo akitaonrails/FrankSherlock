@@ -10,6 +10,7 @@ mod platform;
 mod query_parser;
 mod runtime;
 mod scan;
+mod similarity;
 mod thumbnail;
 
 use std::collections::{HashMap, HashSet};
@@ -494,13 +495,16 @@ fn update_file_metadata(
 #[tauri::command]
 async fn find_duplicates(
     root_scope: Vec<i64>,
+    near_threshold: Option<f32>,
     state: State<'_, AppState>,
 ) -> Result<DuplicatesResponse, String> {
     let db_path = state.paths.db_file.clone();
-    tauri::async_runtime::spawn_blocking(move || db::find_duplicates(&db_path, &root_scope))
-        .await
-        .map_err(|e| AppError::Join(e.to_string()).to_string())?
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        db::find_duplicates(&db_path, &root_scope, near_threshold)
+    })
+    .await
+    .map_err(|e| AppError::Join(e.to_string()).to_string())?
+    .map_err(|e| e.to_string())
 }
 
 // ── Album commands ───────────────────────────────────────────────────

@@ -2,11 +2,44 @@ use std::path::{Path, PathBuf};
 
 use crate::platform::paths::normalize_rel_path;
 
+/// Result of thumbnail generation, including optional perceptual hash.
+pub struct ThumbnailResult {
+    pub path: String,
+    /// dHash computed from the image. `Some` when the thumbnail was freshly
+    /// generated, `None` when the cached thumbnail was reused (image not decoded).
+    pub dhash: Option<u64>,
+}
+
+/// Compute a 64-bit difference hash (dHash) from a decoded image.
+///
+/// Resizes to 9x8 with a fast bilinear filter, converts to grayscale, and
+/// compares adjacent horizontal pixels to produce a 64-bit hash.
+pub fn compute_dhash(img: &image::DynamicImage) -> u64 {
+    let small = img.resize_exact(9, 8, image::imageops::FilterType::Triangle);
+    let gray = small.to_luma8();
+    let mut hash: u64 = 0;
+    for y in 0..8u32 {
+        for x in 0..8u32 {
+            let left = gray.get_pixel(x, y).0[0];
+            let right = gray.get_pixel(x + 1, y).0[0];
+            if left > right {
+                hash |= 1 << (y * 8 + x);
+            }
+        }
+    }
+    hash
+}
+
 /// Generate a thumbnail for the given source image.
 ///
-/// Returns the absolute path to the thumbnail, or `None` if generation fails.
-/// Skips regeneration if the thumbnail already exists and the source hasn't changed.
-pub fn generate_thumbnail(source_path: &Path, thumb_dir: &Path, rel_path: &str) -> Option<String> {
+/// Returns a `ThumbnailResult` with the path and optional dHash, or `None`
+/// if generation fails. Skips regeneration if the thumbnail already exists
+/// and the source hasn't changed (in which case `dhash` will be `None`).
+pub fn generate_thumbnail(
+    source_path: &Path,
+    thumb_dir: &Path,
+    rel_path: &str,
+) -> Option<ThumbnailResult> {
     let stem = normalize_rel_path(&Path::new(rel_path).with_extension("jpg").to_string_lossy());
     let thumb_path = thumb_dir.join(&stem);
 
@@ -20,7 +53,10 @@ pub fn generate_thumbnail(source_path: &Path, thumb_dir: &Path, rel_path: &str) 
             .and_then(|m| m.modified().ok());
         if let (Some(s), Some(t)) = (source_mtime, thumb_mtime) {
             if t >= s {
-                return Some(thumb_path.display().to_string());
+                return Some(ThumbnailResult {
+                    path: thumb_path.display().to_string(),
+                    dhash: None,
+                });
             }
         }
     }
@@ -46,6 +82,8 @@ pub fn generate_thumbnail(source_path: &Path, thumb_dir: &Path, rel_path: &str) 
         }
     };
 
+    let dhash = compute_dhash(&img);
+
     let max_dim = 300u32;
     let (w, h) = (img.width(), img.height());
     let resized = if w > max_dim || h > max_dim {
@@ -70,7 +108,10 @@ pub fn generate_thumbnail(source_path: &Path, thumb_dir: &Path, rel_path: &str) 
         return None;
     }
 
-    Some(thumb_path.display().to_string())
+    Some(ThumbnailResult {
+        path: thumb_path.display().to_string(),
+        dhash: Some(dhash),
+    })
 }
 
 /// Generate a thumbnail for a PDF: up to 2 content pages side-by-side, 300px max dimension.
@@ -79,7 +120,7 @@ pub fn generate_pdf_thumbnail(
     thumb_dir: &Path,
     rel_path: &str,
     pdfium_lib: &Path,
-) -> Option<String> {
+) -> Option<ThumbnailResult> {
     let stem = normalize_rel_path(&Path::new(rel_path).with_extension("jpg").to_string_lossy());
     let thumb_path = thumb_dir.join(&stem);
 
@@ -93,7 +134,10 @@ pub fn generate_pdf_thumbnail(
             .and_then(|m| m.modified().ok());
         if let (Some(s), Some(t)) = (source_mtime, thumb_mtime) {
             if t >= s {
-                return Some(thumb_path.display().to_string());
+                return Some(ThumbnailResult {
+                    path: thumb_path.display().to_string(),
+                    dhash: None,
+                });
             }
         }
     }
@@ -174,6 +218,8 @@ pub fn generate_pdf_thumbnail(
         composite
     };
 
+    let dhash = compute_dhash(&final_img);
+
     let rgb = final_img.to_rgb8();
     let mut buf = std::io::Cursor::new(Vec::new());
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 80);
@@ -190,7 +236,10 @@ pub fn generate_pdf_thumbnail(
         return None;
     }
 
-    Some(thumb_path.display().to_string())
+    Some(ThumbnailResult {
+        path: thumb_path.display().to_string(),
+        dhash: Some(dhash),
+    })
 }
 
 /// For GIF files, extract the first frame. For other formats, return as-is.
@@ -224,12 +273,14 @@ mod tests {
         let source = create_test_image(src_dir.path(), "photo.png", 600, 400);
         let result = generate_thumbnail(&source, thumb_dir.path(), "subdir/photo.png");
         assert!(result.is_some());
-        let thumb_path = PathBuf::from(result.unwrap());
+        let tr = result.unwrap();
+        let thumb_path = PathBuf::from(&tr.path);
         assert!(thumb_path.exists());
         assert!(thumb_path
             .display()
             .to_string()
             .ends_with("subdir/photo.jpg"));
+        assert!(tr.dhash.is_some());
 
         // Verify the thumbnail is smaller
         let thumb_img = image::open(&thumb_path).expect("open thumb");
@@ -244,14 +295,16 @@ mod tests {
 
         let r1 = generate_thumbnail(&source, thumb_dir.path(), "pic.png");
         assert!(r1.is_some());
+        assert!(r1.as_ref().unwrap().dhash.is_some());
 
-        let thumb_path = PathBuf::from(r1.as_ref().unwrap());
+        let thumb_path = PathBuf::from(&r1.unwrap().path);
         let mtime1 = std::fs::metadata(&thumb_path).unwrap().modified().unwrap();
 
-        // Generate again - should skip
+        // Generate again - should skip (dhash will be None)
         std::thread::sleep(std::time::Duration::from_millis(50));
         let r2 = generate_thumbnail(&source, thumb_dir.path(), "pic.png");
         assert!(r2.is_some());
+        assert!(r2.as_ref().unwrap().dhash.is_none());
 
         let mtime2 = std::fs::metadata(&thumb_path).unwrap().modified().unwrap();
         assert_eq!(mtime1, mtime2);
@@ -272,7 +325,7 @@ mod tests {
         let source = create_test_image(src_dir.path(), "tall.png", 200, 800);
         let result = generate_thumbnail(&source, thumb_dir.path(), "tall.png");
         assert!(result.is_some());
-        let thumb_img = image::open(result.unwrap()).expect("open");
+        let thumb_img = image::open(result.unwrap().path).expect("open");
         assert!(thumb_img.height() <= 300);
         assert!(thumb_img.width() < 200);
     }
@@ -284,7 +337,37 @@ mod tests {
         let source = create_test_image(src_dir.path(), "small.png", 100, 80);
         let result = generate_thumbnail(&source, thumb_dir.path(), "small.png");
         assert!(result.is_some());
-        let thumb_img = image::open(result.unwrap()).expect("open");
+        let thumb_img = image::open(result.unwrap().path).expect("open");
         assert_eq!(thumb_img.width(), 100);
+    }
+
+    #[test]
+    fn dhash_stable_for_same_image() {
+        let src_dir = tempfile::tempdir().expect("tempdir");
+        let path = create_test_image(src_dir.path(), "stable.png", 200, 200);
+        let img = image::open(&path).expect("open");
+        let h1 = compute_dhash(&img);
+        let h2 = compute_dhash(&img);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn dhash_different_for_different_images() {
+        let src_dir = tempfile::tempdir().expect("tempdir");
+        let path_a = create_test_image(src_dir.path(), "a.png", 200, 200);
+        // Create a different image
+        let path_b = src_dir.path().join("b.png");
+        let img_b = image::RgbImage::from_fn(200, 200, |x, y| {
+            image::Rgb([255 - (x % 256) as u8, (y % 256) as u8, 0])
+        });
+        image::DynamicImage::ImageRgb8(img_b).save(&path_b).unwrap();
+
+        let img_a = image::open(&path_a).expect("open a");
+        let img_b = image::open(&path_b).expect("open b");
+        let ha = compute_dhash(&img_a);
+        let hb = compute_dhash(&img_b);
+        // Should be different (not guaranteed to be maximally different,
+        // but with these patterns they should differ)
+        assert_ne!(ha, hb);
     }
 }

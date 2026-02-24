@@ -160,8 +160,14 @@ export async function listSmartFolders(): Promise<SmartFolder[]> {
 
 // ── Duplicates ──────────────────────────────────────────────────────
 
-export async function findDuplicates(rootScope: number[] = []): Promise<DuplicatesResponse> {
-  return invoke<DuplicatesResponse>("find_duplicates", { rootScope });
+export async function findDuplicates(
+  rootScope: number[] = [],
+  nearThreshold?: number | null,
+): Promise<DuplicatesResponse> {
+  return invoke<DuplicatesResponse>("find_duplicates", {
+    rootScope,
+    nearThreshold: nearThreshold ?? null,
+  });
 }
 
 // ── Reorder ─────────────────────────────────────────────────────────

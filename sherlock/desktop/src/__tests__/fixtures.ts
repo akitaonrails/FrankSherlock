@@ -67,6 +67,7 @@ export const mockDuplicateFileKeeper: DuplicateFile = {
   sizeBytes: 5000,
   thumbnailPath: "/cache/thumb10.jpg",
   isKeeper: true,
+  groupType: "exact",
 };
 
 export const mockDuplicateFileCopy: DuplicateFile = {
@@ -82,6 +83,7 @@ export const mockDuplicateFileCopy: DuplicateFile = {
   sizeBytes: 5000,
   thumbnailPath: "/cache/thumb11.jpg",
   isKeeper: false,
+  groupType: "exact",
 };
 
 export const mockDuplicateGroup: DuplicateGroup = {
@@ -90,6 +92,8 @@ export const mockDuplicateGroup: DuplicateGroup = {
   totalSizeBytes: 10000,
   wastedBytes: 5000,
   files: [mockDuplicateFileKeeper, mockDuplicateFileCopy],
+  groupType: "exact",
+  avgSimilarity: null,
 };
 
 export const mockDuplicatesResponse: DuplicatesResponse = {
