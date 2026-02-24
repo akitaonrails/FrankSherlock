@@ -136,34 +136,35 @@ export default function Sidebar({
             </div>
           </>
         )}
-        {(onFindDuplicates || onOpenPdfPasswords) && (
-          <>
-            <div className="sidebar-section"><span>Tools</span></div>
-            <div className="sidebar-tool-list">
-              {onFindDuplicates && (
-                <button
-                  type="button"
-                  className="sidebar-tool-btn"
-                  onClick={onFindDuplicates}
-                  title="Find duplicate files across all folders"
-                >
-                  Find Duplicates
-                </button>
-              )}
-              {onOpenPdfPasswords && (
-                <button
-                  type="button"
-                  className="sidebar-tool-btn"
-                  onClick={onOpenPdfPasswords}
-                  title="Manage passwords for protected PDFs"
-                >
-                  PDF Passwords
-                </button>
-              )}
-            </div>
-          </>
-        )}
       </div>
+
+      {(onFindDuplicates || onOpenPdfPasswords) && (
+        <div className="sidebar-tools-fixed">
+          <div className="sidebar-section"><span>Tools</span></div>
+          <div className="sidebar-tool-list">
+            {onFindDuplicates && (
+              <button
+                type="button"
+                className="sidebar-tool-btn"
+                onClick={onFindDuplicates}
+                title="Find duplicate files across all folders"
+              >
+                Find Duplicates
+              </button>
+            )}
+            {onOpenPdfPasswords && (
+              <button
+                type="button"
+                className="sidebar-tool-btn"
+                onClick={onOpenPdfPasswords}
+                title="Manage passwords for protected PDFs"
+              >
+                PDF Passwords
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="sidebar-info-fixed">
         <div className="sidebar-section"><span>Info</span></div>
