@@ -43,7 +43,8 @@ struct FileProbe {
     filename: String,
     mtime_ns: i64,
     size_bytes: i64,
-    fingerprint: String,
+    /// Populated from DB for unchanged files; None for new/modified (computed lazily in phase 2).
+    fingerprint: Option<String>,
     status: FileStatus,
 }
 
@@ -261,11 +262,18 @@ fn run_scan_job_internal(
         // Helper: check cancel flag after slow operations
         let is_cancelled = || -> bool { cancel_flag.is_some_and(|f| f.load(Ordering::Relaxed)) };
 
+        // Compute fingerprint lazily for new/modified files (deferred from discovery)
+        let fingerprint = match &probe.fingerprint {
+            Some(fp) => fp.clone(),
+            None => fingerprint_file(Path::new(&probe.abs_path), probe.size_bytes as u64)?,
+        };
+
         match probe.status {
             FileStatus::Unchanged => unreachable!("filtered above"),
             FileStatus::Modified => {
                 // Re-classify and regenerate thumbnail
-                let classification = classify_and_thumbnail(ctx, probe, job.root_id);
+                let classification =
+                    classify_and_thumbnail(ctx, probe);
                 if is_cancelled() {
                     db::cancel_scan_job(db_path, job_id)?;
                     return Ok(ScanSummary {
@@ -280,7 +288,13 @@ fn run_scan_job_internal(
                         elapsed_ms: started.elapsed().as_millis() as u64,
                     });
                 }
-                let record = probe_to_record(job.root_id, job.scan_marker, probe, &classification);
+                let record = probe_to_record(
+                    job.root_id,
+                    job.scan_marker,
+                    probe,
+                    &fingerprint,
+                    &classification,
+                );
                 db::upsert_file_record(db_path, &record)?;
                 if let Some(ref thumb) = classification.thumb_path {
                     db::update_file_thumb_path(db_path, job.root_id, &probe.rel_path, thumb)?;
@@ -289,7 +303,7 @@ fn run_scan_job_internal(
             }
             FileStatus::New => {
                 // Check for move detection by fingerprint
-                if let Some(candidates) = by_fingerprint.get(&probe.fingerprint) {
+                if let Some(candidates) = by_fingerprint.get(&fingerprint) {
                     if let Some(candidate) = candidates
                         .iter()
                         .find(|c| !used_moved_ids.contains(&c.id) && c.rel_path != probe.rel_path)
@@ -347,7 +361,8 @@ fn run_scan_job_internal(
                 }
 
                 // Genuinely new file — classify
-                let classification = classify_and_thumbnail(ctx, probe, job.root_id);
+                let classification =
+                    classify_and_thumbnail(ctx, probe);
                 if is_cancelled() {
                     db::cancel_scan_job(db_path, job_id)?;
                     return Ok(ScanSummary {
@@ -362,7 +377,13 @@ fn run_scan_job_internal(
                         elapsed_ms: started.elapsed().as_millis() as u64,
                     });
                 }
-                let record = probe_to_record(job.root_id, job.scan_marker, probe, &classification);
+                let record = probe_to_record(
+                    job.root_id,
+                    job.scan_marker,
+                    probe,
+                    &fingerprint,
+                    &classification,
+                );
                 db::upsert_file_record(db_path, &record)?;
                 if let Some(ref thumb) = classification.thumb_path {
                     db::update_file_thumb_path(db_path, job.root_id, &probe.rel_path, thumb)?;
@@ -440,11 +461,7 @@ fn is_pdf_file(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
 }
 
-fn classify_and_thumbnail(
-    ctx: &ScanContext,
-    probe: &FileProbe,
-    _root_id: i64,
-) -> ClassifyAndThumbResult {
+fn classify_and_thumbnail(ctx: &ScanContext, probe: &FileProbe) -> ClassifyAndThumbResult {
     let abs = Path::new(&probe.abs_path);
     let is_pdf = is_pdf_file(abs);
 
@@ -530,8 +547,6 @@ fn collect_image_probes_incremental(
     let mut probes = Vec::new();
     let mut discovered: u64 = 0;
     let mut walk_entries: u64 = 0;
-    let mut fingerprint_count: u64 = 0;
-    let mut fingerprint_ms: u128 = 0;
     for entry in WalkDir::new(root)
         .follow_links(false)
         .into_iter()
@@ -603,38 +618,30 @@ fn collect_image_probes_incremental(
                     filename,
                     mtime_ns,
                     size_bytes,
-                    fingerprint: existing.fingerprint.clone(),
+                    fingerprint: Some(existing.fingerprint.clone()),
                     status: FileStatus::Unchanged,
                 });
             } else {
-                // Modified: need new fingerprint
-                let fp_start = Instant::now();
-                let fingerprint = fingerprint_file(path, metadata.len())?;
-                fingerprint_ms += fp_start.elapsed().as_millis();
-                fingerprint_count += 1;
+                // Modified: fingerprint deferred to phase 2
                 probes.push(FileProbe {
                     rel_path: rel,
                     abs_path: path.display().to_string(),
                     filename,
                     mtime_ns,
                     size_bytes,
-                    fingerprint,
+                    fingerprint: None,
                     status: FileStatus::Modified,
                 });
             }
         } else {
-            // New file: compute fingerprint
-            let fp_start = Instant::now();
-            let fingerprint = fingerprint_file(path, metadata.len())?;
-            fingerprint_ms += fp_start.elapsed().as_millis();
-            fingerprint_count += 1;
+            // New file: fingerprint deferred to phase 2
             probes.push(FileProbe {
                 rel_path: rel,
                 abs_path: path.display().to_string(),
                 filename,
                 mtime_ns,
                 size_bytes,
-                fingerprint,
+                fingerprint: None,
                 status: FileStatus::New,
             });
         }
@@ -649,12 +656,9 @@ fn collect_image_probes_incremental(
     let sort_ms = sort_start.elapsed().as_millis();
 
     log::info!(
-        "Discovery breakdown: {} walkdir entries, {} supported files, \
-         {} fingerprinted in {}ms, sort {}ms",
+        "Discovery breakdown: {} walkdir entries, {} supported files, sort {}ms (fingerprints deferred to phase 2)",
         walk_entries,
         discovered,
-        fingerprint_count,
-        fingerprint_ms,
         sort_ms,
     );
     Ok(probes)
@@ -664,6 +668,7 @@ fn probe_to_record(
     root_id: i64,
     scan_marker: i64,
     probe: &FileProbe,
+    fingerprint: &str,
     result: &ClassifyAndThumbResult,
 ) -> FileRecordUpsert {
     FileRecordUpsert {
@@ -679,7 +684,7 @@ fn probe_to_record(
         lang_hint: result.classification.lang_hint.clone(),
         mtime_ns: probe.mtime_ns,
         size_bytes: probe.size_bytes,
-        fingerprint: probe.fingerprint.clone(),
+        fingerprint: fingerprint.to_string(),
         scan_marker,
         location_text: result.location_text.clone(),
         dhash: result.dhash.map(|h| h as i64),
