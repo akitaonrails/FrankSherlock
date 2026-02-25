@@ -19,6 +19,7 @@ import type {
   SetupDownloadStatus,
   SetupStatus,
   SmartFolder,
+  SubdirEntry,
   SearchRequest,
   SearchResponse,
   VenvProvisionStatus,
@@ -82,6 +83,10 @@ export async function removeRoot(rootId: number): Promise<PurgeResult> {
 
 export async function listRoots(): Promise<RootInfo[]> {
   return invoke<RootInfo[]>("list_roots");
+}
+
+export async function listSubdirectories(rootId: number, parentPrefix: string): Promise<SubdirEntry[]> {
+  return invoke<SubdirEntry[]>("list_subdirectories", { rootId, parentPrefix });
 }
 
 export async function loadUserConfig(): Promise<Record<string, unknown>> {

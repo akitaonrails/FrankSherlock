@@ -18,7 +18,10 @@ static SERVER_PORT: OnceLock<u16> = OnceLock::new();
 pub fn ensure_running() -> u16 {
     *SERVER_PORT.get_or_init(|| {
         let listener = TcpListener::bind("127.0.0.1:0").expect("video server: bind failed");
-        let port = listener.local_addr().expect("video server: local_addr").port();
+        let port = listener
+            .local_addr()
+            .expect("video server: local_addr")
+            .port();
         log::info!("Video streaming server listening on 127.0.0.1:{port}");
 
         std::thread::Builder::new()
@@ -168,11 +171,7 @@ fn copy_n(
     Ok(())
 }
 
-fn send_error(
-    stream: &mut std::net::TcpStream,
-    code: u16,
-    reason: &str,
-) -> std::io::Result<()> {
+fn send_error(stream: &mut std::net::TcpStream, code: u16, reason: &str) -> std::io::Result<()> {
     let body = format!("{code} {reason}");
     let resp = format!(
         "HTTP/1.1 {code} {reason}\r\n\
@@ -212,12 +211,14 @@ fn parse_range(header: &str, file_size: u64) -> Option<(u64, u64)> {
 }
 
 fn parse_query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
-    query
-        .split('&')
-        .find_map(|pair| {
-            let (k, v) = pair.split_once('=')?;
-            if k == key { Some(v) } else { None }
-        })
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        if k == key {
+            Some(v)
+        } else {
+            None
+        }
+    })
 }
 
 fn mime_for_ext(path: &Path) -> &'static str {
@@ -264,10 +265,9 @@ fn urldecod(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(val) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(val) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 out.push(val);
                 i += 3;
                 continue;

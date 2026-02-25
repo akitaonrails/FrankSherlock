@@ -435,6 +435,14 @@ pub struct DuplicateGroup {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubdirEntry {
+    pub rel_path: String,
+    pub name: String,
+    pub file_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DuplicatesResponse {
     pub total_groups: u64,
     pub total_duplicate_files: u64,

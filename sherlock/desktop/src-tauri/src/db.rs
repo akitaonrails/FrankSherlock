@@ -10,7 +10,7 @@ use crate::models::{
     Album, DbStats, DuplicateFile, DuplicateGroup, DuplicatesResponse, ExistingFile, FileMetadata,
     FileProperties, FileRecordUpsert, HealthCheckOutcome, ParsedQuery, PdfPassword,
     ProtectedPdfInfo, PurgeResult, RootInfo, ScanJobState, ScanJobStatus, SearchItem,
-    SearchRequest, SearchResponse, SmartFolder, SortField, SortOrder,
+    SearchRequest, SearchResponse, SmartFolder, SortField, SortOrder, SubdirEntry,
 };
 use crate::query_parser::parse_query;
 
@@ -2075,6 +2075,79 @@ pub fn list_protected_pdfs(db_path: &Path) -> AppResult<Vec<ProtectedPdfInfo>> {
         pdfs.push(row?);
     }
     Ok(pdfs)
+}
+
+// ── Subdirectory listing ────────────────────────────────────────────
+
+pub fn list_subdirectories(
+    db_path: &Path,
+    root_id: i64,
+    parent_prefix: &str,
+) -> AppResult<Vec<SubdirEntry>> {
+    let conn = open_conn(db_path)?;
+    let normalized = crate::platform::paths::normalize_rel_path(parent_prefix);
+    let prefix = normalized.trim_end_matches('/');
+
+    let (like_pattern, segment_start) = if prefix.is_empty() {
+        // Top-level: match all paths that contain '/' (i.e. have subdirs)
+        // Also include files in subdirs directly
+        ("%%".to_string(), 0usize)
+    } else {
+        // Nested: match paths starting with "prefix/"
+        (format!("{prefix}/%"), prefix.len() + 1)
+    };
+
+    // Query all rel_paths under this root matching the prefix pattern.
+    // We extract the next path segment after the prefix to group by directory.
+    let mut stmt = conn.prepare(
+        "SELECT rel_path FROM files
+         WHERE root_id = ? AND deleted_at IS NULL AND rel_path LIKE ?",
+    )?;
+
+    let rows = stmt.query_map(params![root_id, like_pattern], |row| {
+        row.get::<_, String>(0)
+    })?;
+
+    // Accumulate directory names and their recursive file counts
+    let mut dir_counts: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+
+    for row in rows {
+        let rel_path = row?;
+        let suffix = if segment_start == 0 {
+            &rel_path
+        } else if rel_path.len() > segment_start {
+            &rel_path[segment_start..]
+        } else {
+            continue;
+        };
+
+        // Extract the first segment of the suffix (the immediate child dir name)
+        if let Some(slash_pos) = suffix.find('/') {
+            let dir_name = &suffix[..slash_pos];
+            if !dir_name.is_empty() {
+                *dir_counts.entry(dir_name.to_string()).or_insert(0) += 1;
+            }
+        }
+        // Files directly in the parent (no '/' in suffix) are not directories — skip
+    }
+
+    let entries: Vec<SubdirEntry> = dir_counts
+        .into_iter()
+        .map(|(name, count)| {
+            let rel_path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            SubdirEntry {
+                rel_path,
+                name,
+                file_count: count,
+            }
+        })
+        .collect();
+
+    Ok(entries)
 }
 
 // ── Duplicates ──────────────────────────────────────────────────────
@@ -4221,5 +4294,105 @@ mod tests {
         assert_eq!(protected.len(), 1);
         assert_eq!(protected[0].filename, "secret.pdf");
         assert_eq!(protected[0].root_path, "/tmp/test");
+    }
+
+    #[test]
+    fn list_subdirectories_top_level() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        // Files in various subdirectories
+        upsert_file_record(&db_path, &sample_record(root_id, "Photos/a.jpg", "fp1")).unwrap();
+        upsert_file_record(&db_path, &sample_record(root_id, "Photos/b.jpg", "fp2")).unwrap();
+        upsert_file_record(&db_path, &sample_record(root_id, "Documents/c.pdf", "fp3")).unwrap();
+        upsert_file_record(
+            &db_path,
+            &sample_record(root_id, "Photos/2024/d.jpg", "fp4"),
+        )
+        .unwrap();
+        // File at root level (no subdir) — should NOT appear
+        upsert_file_record(&db_path, &sample_record(root_id, "readme.txt", "fp5")).unwrap();
+
+        let dirs = list_subdirectories(&db_path, root_id, "").expect("list");
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(dirs[0].name, "Documents");
+        assert_eq!(dirs[0].file_count, 1);
+        assert_eq!(dirs[1].name, "Photos");
+        assert_eq!(dirs[1].file_count, 3); // a.jpg, b.jpg, 2024/d.jpg (recursive)
+    }
+
+    #[test]
+    fn list_subdirectories_nested() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        upsert_file_record(
+            &db_path,
+            &sample_record(root_id, "Photos/2024/jan.jpg", "fp1"),
+        )
+        .unwrap();
+        upsert_file_record(
+            &db_path,
+            &sample_record(root_id, "Photos/2024/feb.jpg", "fp2"),
+        )
+        .unwrap();
+        upsert_file_record(
+            &db_path,
+            &sample_record(root_id, "Photos/2023/dec.jpg", "fp3"),
+        )
+        .unwrap();
+        // File directly in Photos/ — should NOT appear as a directory
+        upsert_file_record(&db_path, &sample_record(root_id, "Photos/cover.jpg", "fp4")).unwrap();
+
+        let dirs = list_subdirectories(&db_path, root_id, "Photos").expect("list");
+        assert_eq!(dirs.len(), 2);
+        assert_eq!(dirs[0].name, "2023");
+        assert_eq!(dirs[0].rel_path, "Photos/2023");
+        assert_eq!(dirs[0].file_count, 1);
+        assert_eq!(dirs[1].name, "2024");
+        assert_eq!(dirs[1].rel_path, "Photos/2024");
+        assert_eq!(dirs[1].file_count, 2);
+    }
+
+    #[test]
+    fn list_subdirectories_leaf_returns_empty() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        upsert_file_record(
+            &db_path,
+            &sample_record(root_id, "Photos/2024/jan.jpg", "fp1"),
+        )
+        .unwrap();
+
+        // "Photos/2024" has only files, no sub-subdirectories
+        let dirs = list_subdirectories(&db_path, root_id, "Photos/2024").expect("list");
+        assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn list_subdirectories_recursive_counts() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        upsert_file_record(&db_path, &sample_record(root_id, "A/x.jpg", "fp1")).unwrap();
+        upsert_file_record(&db_path, &sample_record(root_id, "A/B/y.jpg", "fp2")).unwrap();
+        upsert_file_record(&db_path, &sample_record(root_id, "A/B/C/z.jpg", "fp3")).unwrap();
+
+        // Top-level: "A" should have 3 files recursively
+        let dirs = list_subdirectories(&db_path, root_id, "").expect("list");
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0].name, "A");
+        assert_eq!(dirs[0].file_count, 3);
+
+        // One level in: "A" -> "B" should have 2 files recursively
+        let dirs = list_subdirectories(&db_path, root_id, "A").expect("list");
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0].name, "B");
+        assert_eq!(dirs[0].file_count, 2);
     }
 }

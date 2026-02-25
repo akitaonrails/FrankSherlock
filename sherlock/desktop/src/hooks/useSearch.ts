@@ -8,6 +8,7 @@ type UseSearchParams = {
   query: string;
   selectedMediaType: string;
   selectedRootId: number | null;
+  selectedSubdir: string | null;
   sortBy: SortField;
   sortOrder: SortOrder;
   isReady: boolean;
@@ -15,7 +16,7 @@ type UseSearchParams = {
   onReconcileSelection: (oldItems: SearchItem[], newItems: SearchItem[]) => void;
 };
 
-export function useSearch({ query, selectedMediaType, selectedRootId, sortBy, sortOrder, isReady, onClearSelection, onReconcileSelection }: UseSearchParams) {
+export function useSearch({ query, selectedMediaType, selectedRootId, selectedSubdir, sortBy, sortOrder, isReady, onClearSelection, onReconcileSelection }: UseSearchParams) {
   const [items, setItems] = useState<SearchItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -48,8 +49,16 @@ export function useSearch({ query, selectedMediaType, selectedRootId, sortBy, so
     if (append) setLoadingMore(true);
     else setLoading(true);
     try {
+      // Prepend subdir: prefix when a subdirectory is selected
+      let effectiveQuery = query;
+      if (selectedSubdir) {
+        const subdirPrefix = selectedSubdir.includes(" ")
+          ? `subdir:"${selectedSubdir}"`
+          : `subdir:${selectedSubdir}`;
+        effectiveQuery = effectiveQuery ? `${subdirPrefix} ${effectiveQuery}` : subdirPrefix;
+      }
       const response = await searchImages({
-        query,
+        query: effectiveQuery,
         limit: limitOverride ?? PAGE_SIZE,
         offset,
         mediaTypes: selectedMediaType ? [selectedMediaType] : undefined,
@@ -66,7 +75,7 @@ export function useSearch({ query, selectedMediaType, selectedRootId, sortBy, so
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [query, selectedMediaType, selectedRootId, sortBy, sortOrder, onClearSelection, onReconcileSelection]);
+  }, [query, selectedMediaType, selectedRootId, selectedSubdir, sortBy, sortOrder, onClearSelection, onReconcileSelection]);
 
   const onLoadMore = useCallback(async () => {
     if (!canLoadMore || loadingMore) return;
@@ -80,7 +89,7 @@ export function useSearch({ query, selectedMediaType, selectedRootId, sortBy, so
       void runSearch(0, false);
     }, 260);
     return () => clearTimeout(timer);
-  }, [query, selectedMediaType, selectedRootId, sortBy, sortOrder, isReady]);
+  }, [query, selectedMediaType, selectedRootId, selectedSubdir, sortBy, sortOrder, isReady]);
 
   return { items, total, loading, loadingMore, canLoadMore, runSearch, onLoadMore };
 }

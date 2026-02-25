@@ -16,6 +16,8 @@ const defaultProps = {
   smartFolders: [] as SmartFolder[],
   activeAlbumName: null,
   activeSmartFolderId: null,
+  selectedSubdir: null,
+  onSelectSubdir: vi.fn(),
   onSelectRoot: vi.fn(),
   onDeleteRoot: vi.fn(),
   onRescanRoot: vi.fn(),

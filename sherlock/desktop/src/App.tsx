@@ -93,6 +93,9 @@ export default function App() {
   const [pendingAlbumFileIds, setPendingAlbumFileIds] = useState<number[]>([]);
   const [activeSmartFolderId, setActiveSmartFolderId] = useState<number | null>(null);
 
+  /* ── Directory tree state ── */
+  const [selectedSubdir, setSelectedSubdir] = useState<string | null>(null);
+
   /* ── PDF Passwords state ── */
   const [pdfPasswordsMode, setPdfPasswordsMode] = useState(false);
 
@@ -159,6 +162,7 @@ export default function App() {
     query,
     selectedMediaType,
     selectedRootId,
+    selectedSubdir,
     sortBy,
     sortOrder,
     isReady: !setup || setup.isReady,
@@ -327,10 +331,12 @@ export default function App() {
     if (sf) return sf.name;
     if (selectedRootId != null) {
       const root = roots.find(r => r.id === selectedRootId);
-      if (root) return root.rootName;
+      if (root) {
+        return selectedSubdir ? `${root.rootName} / ${selectedSubdir}` : root.rootName;
+      }
     }
     return null;
-  }, [duplicatesMode, activeAlbumName, activeSmartFolderId, smartFolders, selectedRootId, roots]);
+  }, [duplicatesMode, activeAlbumName, activeSmartFolderId, smartFolders, selectedRootId, roots, selectedSubdir, pdfPasswordsMode]);
 
   /* ── Handlers ── */
   function onWindowClose() {
@@ -916,7 +922,9 @@ export default function App() {
           smartFolders={smartFolders}
           activeAlbumName={activeAlbumName}
           activeSmartFolderId={activeSmartFolderId}
-          onSelectRoot={(id) => { setSelectedRootId(id); setDuplicatesMode(false); setPdfPasswordsMode(false); }}
+          selectedSubdir={selectedSubdir}
+          onSelectSubdir={setSelectedSubdir}
+          onSelectRoot={(id) => { setSelectedRootId(id); setSelectedSubdir(null); setDuplicatesMode(false); setPdfPasswordsMode(false); }}
           onDeleteRoot={(root) => setConfirmDeleteRoot(root)}
           onRescanRoot={(root) => scanManager.onRescanRoot(root, setup, readOnly)}
           onCopyRootPath={(root) => {

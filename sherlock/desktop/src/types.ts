@@ -240,6 +240,12 @@ export type RetryProtectedPdfsResult = {
   stillProtected: number;
 };
 
+export type SubdirEntry = {
+  relPath: string;
+  name: string;
+  fileCount: number;
+};
+
 export type UpdateInfo = {
   version: string;
   body: string | null;

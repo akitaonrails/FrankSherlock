@@ -365,3 +365,85 @@
 .root-card-context-menu button.danger {
   color: var(--danger);
 }
+
+/* ── Directory tree ──────────────────────────────────── */
+.dir-tree {
+  padding: 2px 0 4px;
+}
+
+.dir-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+  min-height: 22px;
+}
+
+.dir-tree-chevron {
+  all: unset;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+}
+
+.dir-tree-chevron:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.dir-tree-label {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.dir-tree-label:hover {
+  background: var(--bg-hover);
+}
+
+.dir-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.dir-tree-count {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.dir-tree-selected .dir-tree-label {
+  background: var(--bg-hover);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.dir-tree-selected .dir-tree-name {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.dir-tree-loading {
+  padding: 4px 12px;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}

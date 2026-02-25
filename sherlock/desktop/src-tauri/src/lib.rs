@@ -25,7 +25,7 @@ use models::{
     Album, DeleteFilesResult, DuplicatesResponse, HealthCheckOutcome, HealthStatus, PdfPassword,
     ProtectedPdfInfo, PurgeResult, RenameFileResult, RetryProtectedPdfsResult, RootInfo,
     RuntimeStatus, ScanJobStatus, SearchRequest, SearchResponse, SetupDownloadStatus, SetupStatus,
-    SmartFolder, VenvProvisionStatus,
+    SmartFolder, SubdirEntry, VenvProvisionStatus,
 };
 use tauri::Manager;
 use tauri::State;
@@ -313,6 +313,16 @@ fn remove_root(root_id: i64, state: State<'_, AppState>) -> Result<PurgeResult, 
 #[tauri::command]
 fn list_roots(state: State<'_, AppState>) -> Result<Vec<RootInfo>, String> {
     db::list_roots(&state.paths.db_file).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_subdirectories(
+    root_id: i64,
+    parent_prefix: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SubdirEntry>, String> {
+    db::list_subdirectories(&state.paths.db_file, root_id, &parent_prefix)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1146,6 +1156,7 @@ pub fn run() {
             cancel_scan,
             remove_root,
             list_roots,
+            list_subdirectories,
             load_user_config,
             save_user_config,
             copy_files_to_clipboard,

@@ -4,6 +4,7 @@ import { useDragReorder } from "../../hooks/useDragReorder";
 import RootCard from "./RootCard";
 import AlbumCard from "./AlbumCard";
 import SmartFolderCard from "./SmartFolderCard";
+import DirectoryTree from "./DirectoryTree";
 import "./Sidebar.css";
 
 type SidebarProps = {
@@ -17,6 +18,8 @@ type SidebarProps = {
   smartFolders: SmartFolder[];
   activeAlbumName: string | null;
   activeSmartFolderId: number | null;
+  selectedSubdir: string | null;
+  onSelectSubdir: (subdir: string | null) => void;
   onSelectRoot: (rootId: number | null) => void;
   onDeleteRoot: (root: RootInfo) => void;
   onPickAndScan: () => void;
@@ -44,6 +47,7 @@ type SidebarProps = {
 export default function Sidebar({
   roots, selectedRootId, activeScans, dbStats, readOnly,
   setupReady, albums, smartFolders, activeAlbumName, activeSmartFolderId,
+  selectedSubdir, onSelectSubdir,
   onSelectRoot, onDeleteRoot, onRescanRoot, onCopyRootPath, onPickAndScan,
   onCancelScan, onResumeScan,
   onSelectAlbum, onDeleteAlbum, onSelectSmartFolder, onDeleteSmartFolder,
@@ -98,6 +102,13 @@ export default function Sidebar({
                   onCancelScan={scan?.status === "running" ? () => onCancelScan(scan) : undefined}
                   onResumeScan={scan?.status === "interrupted" ? () => onResumeScan(scan) : undefined}
                 />
+                {selectedRootId === root.id && (
+                  <DirectoryTree
+                    rootId={root.id}
+                    selectedSubdir={selectedSubdir}
+                    onSelectSubdir={onSelectSubdir}
+                  />
+                )}
               </div>
             );
           })}
