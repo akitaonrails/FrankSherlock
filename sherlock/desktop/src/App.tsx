@@ -93,8 +93,11 @@ export default function App() {
   const [pendingAlbumFileIds, setPendingAlbumFileIds] = useState<number[]>([]);
   const [activeSmartFolderId, setActiveSmartFolderId] = useState<number | null>(null);
 
-  /* ── Directory tree state ── */
-  const [selectedSubdir, setSelectedSubdir] = useState<string | null>(null);
+  /* ── Directory tree: derived from query ── */
+  const selectedSubdir = useMemo(() => {
+    const match = query.match(/\bsubdir:(?:"([^"]+)"|(\S+))/i);
+    return match ? (match[1] ?? match[2] ?? null) : null;
+  }, [query]);
 
   /* ── PDF Passwords state ── */
   const [pdfPasswordsMode, setPdfPasswordsMode] = useState(false);
@@ -162,7 +165,6 @@ export default function App() {
     query,
     selectedMediaType,
     selectedRootId,
-    selectedSubdir,
     sortBy,
     sortOrder,
     isReady: !setup || setup.isReady,
@@ -923,8 +925,21 @@ export default function App() {
           activeAlbumName={activeAlbumName}
           activeSmartFolderId={activeSmartFolderId}
           selectedSubdir={selectedSubdir}
-          onSelectSubdir={setSelectedSubdir}
-          onSelectRoot={(id) => { setSelectedRootId(id); setSelectedSubdir(null); setDuplicatesMode(false); setPdfPasswordsMode(false); }}
+          onSelectSubdir={(subdir) => {
+            setQuery((q) => {
+              const cleaned = q.replace(/\bsubdir:(?:"[^"]*?"|\S+)\s*/i, "").trim();
+              if (!subdir) return cleaned;
+              const prefix = subdir.includes(" ") ? `subdir:"${subdir}"` : `subdir:${subdir}`;
+              return cleaned ? `${prefix} ${cleaned}` : prefix;
+            });
+            setActiveSmartFolderId(null);
+          }}
+          onSelectRoot={(id) => {
+            setSelectedRootId(id);
+            setQuery((q) => q.replace(/\bsubdir:(?:"[^"]*?"|\S+)\s*/i, "").trim());
+            setDuplicatesMode(false);
+            setPdfPasswordsMode(false);
+          }}
           onDeleteRoot={(root) => setConfirmDeleteRoot(root)}
           onRescanRoot={(root) => scanManager.onRescanRoot(root, setup, readOnly)}
           onCopyRootPath={(root) => {
