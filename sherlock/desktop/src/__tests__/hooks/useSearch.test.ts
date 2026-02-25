@@ -32,7 +32,7 @@ describe("useSearch", () => {
       items: [
         { id: 1, rootId: 1, relPath: "a.jpg", absPath: "/a.jpg", mediaType: "photo", description: "", confidence: 0.9, mtimeNs: 0, sizeBytes: 100 },
       ],
-      parsedQuery: { rawQuery: "", queryText: "", mediaTypes: [], rootHints: [], parserConfidence: 1 },
+      parsedQuery: { rawQuery: "", queryText: "", mediaTypes: [], parserConfidence: 1 },
     });
   });
 

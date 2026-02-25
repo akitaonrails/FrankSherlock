@@ -61,10 +61,18 @@ export default function HelpModal({ onClose }: Props) {
         </div>
 
         <div className="help-section">
-          <h4>Folder filter</h4>
+          <h4>Album filter</h4>
           <div className="help-examples">
-            <code>in Dropbox</code>
-            <code>receipts in Downloads</code>
+            <code>album:vacation</code>
+            <code>album:&quot;my trip&quot; sunset</code>
+          </div>
+        </div>
+
+        <div className="help-section">
+          <h4>Subdirectory filter</h4>
+          <div className="help-examples">
+            <code>subdir:Screenshots</code>
+            <code>subdir:&quot;Photos/2024&quot; sunset</code>
           </div>
         </div>
 
@@ -72,13 +80,15 @@ export default function HelpModal({ onClose }: Props) {
           <h4>Combined</h4>
           <div className="help-examples">
             <code>anime between 2023 and 2024</code>
-            <code>receipts in Dropbox confidence &gt;= 0.9</code>
-            <code>photos from 2022 in Camera</code>
+            <code>receipt confidence &gt;= 0.9</code>
+            <code>photos from 2022</code>
           </div>
         </div>
 
         <p className="help-note">
-          Filters combine with AND. If no results, media type and confidence filters relax automatically.
+          Filters combine with AND. Word stemming is applied (e.g. &quot;running&quot; matches &quot;run&quot;).
+          If no FTS results, a substring fallback is used automatically.
+          Media type and confidence filters relax if no results.
         </p>
 
         <div className="modal-actions">

@@ -2,6 +2,28 @@ use regex::Regex;
 
 use crate::models::ParsedQuery;
 
+/// (regex_pattern, media_type, score_bump) — multi-word patterns first so they match before singles.
+const MEDIA_TRIGGERS: &[(&str, &str, f32)] = &[
+    // Multi-word (must come before single-word components)
+    (r"girl\s+character", "anime", 0.2),
+    (r"tv\s+shows?", "video", 0.2),
+    // Single-word
+    (r"receipts?", "document", 0.2),
+    (r"invoices?", "document", 0.2),
+    (r"comprovantes?", "document", 0.2),
+    (r"bank", "document", 0.2),
+    (r"statements?", "document", 0.2),
+    (r"anime", "anime", 0.2),
+    (r"manga", "anime", 0.2),
+    (r"waifus?", "anime", 0.2),
+    (r"screenshots?", "screenshot", 0.1),
+    (r"videos?", "video", 0.2),
+    (r"movies?", "video", 0.2),
+    (r"episodes?", "video", 0.2),
+    (r"films?", "video", 0.2),
+    (r"photos?", "photo", 0.1),
+];
+
 pub fn parse_query(raw_query: &str) -> ParsedQuery {
     let raw = raw_query.trim();
     if raw.is_empty() {
@@ -34,63 +56,30 @@ pub fn parse_query(raw_query: &str) -> ParsedQuery {
         working_query
     };
 
-    let lower = working_query.to_lowercase();
     let mut media_types = Vec::new();
-    let mut root_hints = Vec::new();
     let mut min_confidence = None;
     let mut date_from = None;
     let mut date_to = None;
     let mut score = 0.25_f32;
 
-    if lower.contains("receipt")
-        || lower.contains("invoice")
-        || lower.contains("comprovante")
-        || lower.contains("bank")
-        || lower.contains("statement")
-    {
-        media_types.push("document".to_string());
-        score += 0.2;
-    }
-    if lower.contains("anime")
-        || lower.contains("manga")
-        || lower.contains("girl character")
-        || lower.contains("waifu")
-    {
-        media_types.push("anime".to_string());
-        score += 0.2;
-    }
-    if lower.contains("screenshot") {
-        media_types.push("screenshot".to_string());
-        score += 0.1;
-    }
-    if lower.contains("video")
-        || lower.contains("movie")
-        || lower.contains("episode")
-        || lower.contains("film")
-        || lower.contains("tv show")
-    {
-        media_types.push("video".to_string());
-        score += 0.2;
-    }
-    if lower.contains("photo") {
-        media_types.push("photo".to_string());
-        score += 0.1;
+    // Detect media-type triggers and collect patterns to strip
+    let mut matched_patterns: Vec<(Regex, usize)> = Vec::new();
+    for &(pattern, media_type, bump) in MEDIA_TRIGGERS {
+        let re = Regex::new(&format!(r"(?i)\b{}\b", pattern)).expect("valid trigger regex");
+        if re.is_match(&working_query) {
+            if !media_types.contains(&media_type.to_string()) {
+                media_types.push(media_type.to_string());
+                score += bump;
+            }
+            // Track pattern length (approximate) for longest-first stripping
+            matched_patterns.push((re, pattern.len()));
+        }
     }
     dedup(&mut media_types);
 
     if let Some(conf) = parse_min_confidence(&working_query) {
         min_confidence = Some(conf);
         score += 0.15;
-    }
-
-    let root_re = Regex::new(r"(?i)\bin\s+([A-Za-z0-9._/\-]+)").expect("valid regex");
-    for cap in root_re.captures_iter(&working_query) {
-        if let Some(v) = cap.get(1) {
-            root_hints.push(v.as_str().to_string());
-        }
-    }
-    if !root_hints.is_empty() {
-        score += 0.1;
     }
 
     if let Some((start, end)) = parse_date_range(&working_query) {
@@ -106,14 +95,23 @@ pub fn parse_query(raw_query: &str) -> ParsedQuery {
         score += 0.2;
     }
 
+    // Strip matched media keywords from query text, longest patterns first
+    let mut query_text = working_query.clone();
+    matched_patterns.sort_by(|a, b| b.1.cmp(&a.1));
+    for (re, _) in &matched_patterns {
+        query_text = re.replace_all(&query_text, " ").to_string();
+    }
+    // Collapse whitespace and trim
+    let ws_re = Regex::new(r"\s+").expect("valid regex");
+    let query_text = ws_re.replace_all(query_text.trim(), " ").to_string();
+
     ParsedQuery {
         raw_query: raw.to_string(),
-        query_text: working_query,
+        query_text,
         media_types,
         date_from,
         date_to,
         min_confidence,
-        root_hints,
         parser_confidence: score.clamp(0.0, 1.0),
         album_name,
         subdir,
@@ -187,10 +185,9 @@ mod tests {
 
     #[test]
     fn parses_between_year_range() {
-        let parsed = parse_query("receipts between 2023 and 2024 in Dropbox");
+        let parsed = parse_query("receipts between 2023 and 2024");
         assert_eq!(parsed.date_from.as_deref(), Some("2023-01-01"));
         assert_eq!(parsed.date_to.as_deref(), Some("2024-12-31"));
-        assert_eq!(parsed.root_hints, vec!["Dropbox".to_string()]);
         assert!(parsed.media_types.contains(&"document".to_string()));
     }
 
@@ -236,14 +233,13 @@ mod tests {
         assert!(parsed.media_types.is_empty());
         assert!(parsed.date_from.is_none());
         assert!(parsed.min_confidence.is_none());
-        assert!(parsed.root_hints.is_empty());
     }
 
     #[test]
     fn parses_photo_media_type() {
         let parsed = parse_query("photo beach");
         assert!(parsed.media_types.contains(&"photo".to_string()));
-        assert_eq!(parsed.query_text, "photo beach");
+        assert_eq!(parsed.query_text, "beach");
     }
 
     #[test]
@@ -286,19 +282,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_root_hint_only() {
-        let parsed = parse_query("in Dropbox");
-        assert_eq!(parsed.root_hints, vec!["Dropbox".to_string()]);
-    }
-
-    #[test]
-    fn parses_media_type_with_root_hint() {
-        let parsed = parse_query("receipts in Downloads");
-        assert!(parsed.media_types.contains(&"document".to_string()));
-        assert_eq!(parsed.root_hints, vec!["Downloads".to_string()]);
-    }
-
-    #[test]
     fn parses_combined_anime_date_range() {
         let parsed = parse_query("anime between 2023 and 2024");
         assert!(parsed.media_types.contains(&"anime".to_string()));
@@ -307,19 +290,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_combined_receipts_root_confidence() {
-        let parsed = parse_query("receipts in Dropbox confidence >= 0.9");
+    fn parses_combined_receipts_confidence() {
+        let parsed = parse_query("receipts confidence >= 0.9");
         assert!(parsed.media_types.contains(&"document".to_string()));
-        assert_eq!(parsed.root_hints, vec!["Dropbox".to_string()]);
         assert_eq!(parsed.min_confidence, Some(0.9));
     }
 
     #[test]
-    fn parses_combined_photos_from_year_root() {
-        let parsed = parse_query("photos from 2022 in Camera");
+    fn parses_combined_photos_from_year() {
+        let parsed = parse_query("photos from 2022");
         assert!(parsed.media_types.contains(&"photo".to_string()));
         assert_eq!(parsed.date_from.as_deref(), Some("2022-01-01"));
-        assert_eq!(parsed.root_hints, vec!["Camera".to_string()]);
     }
 
     #[test]
@@ -382,5 +363,37 @@ mod tests {
         let parsed = parse_query("beach sunset");
         assert!(parsed.subdir.is_none());
         assert_eq!(parsed.query_text, "beach sunset");
+    }
+
+    // -----------------------------------------------------------------------
+    // Media keyword stripping tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn strips_media_keywords_from_query_text() {
+        let parsed = parse_query("photo beach sunset");
+        assert!(parsed.media_types.contains(&"photo".to_string()));
+        assert_eq!(parsed.query_text, "beach sunset");
+    }
+
+    #[test]
+    fn strips_plural_media_keywords() {
+        let parsed = parse_query("photos from 2022");
+        assert!(parsed.media_types.contains(&"photo".to_string()));
+        assert_eq!(parsed.query_text, "from 2022");
+    }
+
+    #[test]
+    fn strips_multi_word_trigger() {
+        let parsed = parse_query("tv show comedy");
+        assert!(parsed.media_types.contains(&"video".to_string()));
+        assert_eq!(parsed.query_text, "comedy");
+    }
+
+    #[test]
+    fn media_only_query_produces_empty_text() {
+        let parsed = parse_query("screenshot");
+        assert!(parsed.media_types.contains(&"screenshot".to_string()));
+        assert_eq!(parsed.query_text, "");
     }
 }

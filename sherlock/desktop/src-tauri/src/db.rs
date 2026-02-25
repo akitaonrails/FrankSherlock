@@ -251,6 +251,10 @@ fn run_migrations(conn: &mut Connection) -> AppResult<()> {
             ALTER TABLE files ADD COLUMN audio_codec TEXT;
             "#,
         ),
+        // Migration 10: Rebuild FTS5 with porter stemmer for word variation matching
+        M::up_with_hook("SELECT 1;", |conn| {
+            rebuild_fts_with_porter(conn).map_err(|e| HookError::Hook(e.to_string()))
+        }),
     ]);
 
     migrations
@@ -1463,7 +1467,13 @@ pub fn search_images(db_path: &Path, request: &SearchRequest) -> AppResult<Searc
     if inferred_date_to {
         relaxed.date_to = None;
     }
-    search_images_normalized(db_path, relaxed, parsed)
+    let relaxed_result = search_images_normalized(db_path, relaxed.clone(), parsed.clone())?;
+    if relaxed_result.total > 0 || parsed.query_text.trim().is_empty() {
+        return Ok(relaxed_result);
+    }
+
+    // FTS returned nothing — try LIKE substring fallback
+    search_like_fallback(db_path, &relaxed, &parsed)
 }
 
 fn normalize_request(request: &SearchRequest, parsed: &ParsedQuery) -> SearchRequest {
@@ -1609,6 +1619,126 @@ fn search_images_normalized(
         offset,
         items,
         parsed_query: parsed,
+    })
+}
+
+fn search_like_fallback(
+    db_path: &Path,
+    request: &SearchRequest,
+    parsed: &ParsedQuery,
+) -> AppResult<SearchResponse> {
+    let conn = open_conn(db_path)?;
+    let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    let offset = request.offset.unwrap_or(0);
+    let query_lower = parsed.query_text.trim().to_lowercase();
+    let like_pattern = format!("%{query_lower}%");
+
+    let mut from_sql = String::from(" FROM files f ");
+    let mut where_clauses = vec!["f.deleted_at IS NULL".to_string()];
+    let mut bind_values: Vec<Value> = Vec::new();
+
+    // LIKE across searchable text columns
+    where_clauses.push(
+        "(LOWER(f.description) LIKE ? OR LOWER(f.extracted_text) LIKE ? \
+         OR LOWER(f.filename) LIKE ? OR LOWER(f.canonical_mentions) LIKE ? \
+         OR LOWER(f.location_text) LIKE ?)"
+            .to_string(),
+    );
+    for _ in 0..5 {
+        bind_values.push(Value::Text(like_pattern.clone()));
+    }
+
+    if !request.root_scope.is_empty() {
+        let placeholders = vec!["?"; request.root_scope.len()].join(", ");
+        where_clauses.push(format!("f.root_id IN ({placeholders})"));
+        for root_id in &request.root_scope {
+            bind_values.push(Value::Integer(*root_id));
+        }
+    }
+
+    if let Some(album_name) = &parsed.album_name {
+        from_sql.push_str(
+            " JOIN album_files af ON af.file_id = f.id \
+             JOIN albums a ON a.id = af.album_id ",
+        );
+        where_clauses.push("a.name = ? COLLATE NOCASE".to_string());
+        bind_values.push(Value::Text(album_name.clone()));
+    }
+
+    if let Some(ref dir) = parsed.subdir {
+        let normalized_dir = crate::platform::paths::normalize_rel_path(dir);
+        where_clauses.push("f.rel_path LIKE ?".to_string());
+        bind_values.push(Value::Text(format!("{}/%", normalized_dir)));
+    }
+
+    let media_types = normalize_media_types(&request.media_types);
+    if !media_types.is_empty() {
+        let placeholders = vec!["?"; media_types.len()].join(", ");
+        where_clauses.push(format!("f.media_type IN ({placeholders})"));
+        for media in media_types {
+            bind_values.push(Value::Text(media));
+        }
+    }
+
+    if let Some(min_conf) = request.min_confidence {
+        where_clauses.push("f.confidence >= ?".to_string());
+        bind_values.push(Value::Real(min_conf.clamp(0.0, 1.0) as f64));
+    }
+
+    if let Some(start_ns) = request
+        .date_from
+        .as_ref()
+        .and_then(|v| parse_date_start_ns(v))
+    {
+        where_clauses.push("f.mtime_ns >= ?".to_string());
+        bind_values.push(Value::Integer(start_ns));
+    }
+    if let Some(end_ns) = request.date_to.as_ref().and_then(|v| parse_date_end_ns(v)) {
+        where_clauses.push("f.mtime_ns <= ?".to_string());
+        bind_values.push(Value::Integer(end_ns));
+    }
+
+    let where_sql = format!(" WHERE {}", where_clauses.join(" AND "));
+    let count_sql = format!("SELECT COUNT(*){}{}", from_sql, where_sql);
+    let mut count_stmt = conn.prepare(&count_sql)?;
+    let total: i64 = count_stmt.query_row(params_from_iter(bind_values.clone()), |r| r.get(0))?;
+
+    let order_sql = " ORDER BY f.confidence DESC, f.mtime_ns DESC, f.id DESC ";
+    let select_sql = format!(
+        "SELECT f.id, f.root_id, f.rel_path, f.abs_path, f.media_type, f.description, \
+         f.confidence, f.mtime_ns, f.size_bytes, f.thumb_path{}{}{} LIMIT ? OFFSET ?",
+        from_sql, where_sql, order_sql
+    );
+    let mut select_bind = bind_values;
+    select_bind.push(Value::Integer(limit as i64));
+    select_bind.push(Value::Integer(offset as i64));
+    let mut stmt = conn.prepare(&select_sql)?;
+    let rows = stmt.query_map(params_from_iter(select_bind), |row| {
+        Ok(SearchItem {
+            id: row.get(0)?,
+            root_id: row.get(1)?,
+            rel_path: row.get(2)?,
+            abs_path: row.get(3)?,
+            media_type: row.get(4)?,
+            description: row.get(5)?,
+            confidence: row.get::<_, f64>(6)? as f32,
+            mtime_ns: row.get(7)?,
+            size_bytes: row.get(8)?,
+            thumbnail_path: row.get(9)?,
+        })
+    })?;
+
+    let mut items = Vec::new();
+    for item in rows {
+        items.push(item?);
+    }
+
+    Ok(SearchResponse {
+        total: total as u64,
+        limit,
+        offset,
+        items,
+        parsed_query: parsed.clone(),
     })
 }
 
@@ -1793,6 +1923,28 @@ fn rebuild_fts_with_location(conn: &Connection) -> AppResult<()> {
             extracted_text,
             canonical_mentions,
             location_text
+        );
+        INSERT INTO files_fts (rowid, filename, rel_path, description, extracted_text,
+                               canonical_mentions, location_text)
+        SELECT id, filename, rel_path, description, extracted_text,
+               canonical_mentions, location_text FROM files;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn rebuild_fts_with_porter(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS files_fts;
+        CREATE VIRTUAL TABLE files_fts USING fts5(
+            filename,
+            rel_path,
+            description,
+            extracted_text,
+            canonical_mentions,
+            location_text,
+            tokenize = 'porter unicode61'
         );
         INSERT INTO files_fts (rowid, filename, rel_path, description, extracted_text,
                                canonical_mentions, location_text)
@@ -3267,11 +3419,11 @@ mod tests {
         init_database(&db_path).expect("init");
 
         let conn = open_conn(&db_path).expect("open");
-        // Verify user_version is set (10 migrations applied → version 10)
+        // Verify user_version is set (11 migrations applied → version 11)
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .expect("user_version");
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
 
         // Verify all tables exist
         let tables: Vec<String> = {
@@ -3313,8 +3465,8 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .expect("user_version");
-        // We have 10 migrations (indices 0..9), so user_version should be 10
-        assert_eq!(version, 10);
+        // We have 11 migrations (indices 0..10), so user_version should be 11
+        assert_eq!(version, 11);
     }
 
     #[test]
@@ -4394,5 +4546,71 @@ mod tests {
         assert_eq!(dirs.len(), 1);
         assert_eq!(dirs[0].name, "B");
         assert_eq!(dirs[0].file_count, 2);
+    }
+
+    #[test]
+    fn fts_porter_stemming_matches_variations() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        let mut rec = sample_record(root_id, "images/park.jpg", "fp-stem");
+        rec.description = "running dogs on beaches".to_string();
+        upsert_file_record(&db_path, &rec).expect("upsert");
+
+        // Porter stemmer reduces "run" and "running" to the same stem
+        let req = SearchRequest {
+            query: "run dog beach".to_string(),
+            limit: Some(20),
+            offset: Some(0),
+            ..SearchRequest::default()
+        };
+        let result = search_images(&db_path, &req).expect("search");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].rel_path, "images/park.jpg");
+    }
+
+    #[test]
+    fn like_fallback_catches_substring() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        let mut rec = sample_record(root_id, "images/sunset.jpg", "fp-like");
+        rec.description = "beautiful sunset landscape".to_string();
+        upsert_file_record(&db_path, &rec).expect("upsert");
+
+        // "sunse" is a substring that FTS won't match (not a valid stem)
+        let req = SearchRequest {
+            query: "sunse".to_string(),
+            limit: Some(20),
+            offset: Some(0),
+            ..SearchRequest::default()
+        };
+        let result = search_images(&db_path, &req).expect("search");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].rel_path, "images/sunset.jpg");
+    }
+
+    #[test]
+    fn like_fallback_skipped_when_fts_matches() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/demo").expect("root");
+
+        let mut rec = sample_record(root_id, "images/cat.jpg", "fp-skip");
+        rec.description = "a fluffy cat sleeping on a sofa".to_string();
+        upsert_file_record(&db_path, &rec).expect("upsert");
+
+        // "cat" matches directly via FTS — no fallback needed
+        let req = SearchRequest {
+            query: "cat".to_string(),
+            limit: Some(20),
+            offset: Some(0),
+            ..SearchRequest::default()
+        };
+        let result = search_images(&db_path, &req).expect("search");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].rel_path, "images/cat.jpg");
     }
 }

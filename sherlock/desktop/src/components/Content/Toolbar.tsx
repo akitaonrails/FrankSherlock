@@ -48,7 +48,7 @@ export default function Toolbar({
     <div className="toolbar">
       <input
         type="search"
-        placeholder="e.g. beach sunset photo:yes — F1 for help"
+        placeholder="e.g. photo beach sunset — F1 for help"
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         aria-label="Search query"

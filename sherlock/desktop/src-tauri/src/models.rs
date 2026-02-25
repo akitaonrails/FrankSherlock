@@ -92,7 +92,6 @@ pub struct ParsedQuery {
     pub date_from: Option<String>,
     pub date_to: Option<String>,
     pub min_confidence: Option<f32>,
-    pub root_hints: Vec<String>,
     pub parser_confidence: f32,
     #[serde(default)]
     pub album_name: Option<String>,
@@ -109,7 +108,6 @@ impl ParsedQuery {
             date_from: None,
             date_to: None,
             min_confidence: None,
-            root_hints: Vec::new(),
             parser_confidence: 0.2,
             album_name: None,
             subdir: None,

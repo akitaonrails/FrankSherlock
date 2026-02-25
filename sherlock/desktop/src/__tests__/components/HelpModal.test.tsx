@@ -13,7 +13,7 @@ describe("HelpModal", () => {
     render(<HelpModal onClose={() => {}} />);
     expect(screen.getByText("anime ranma")).toBeInTheDocument();
     expect(screen.getByText("between 2023 and 2024")).toBeInTheDocument();
-    expect(screen.getByText("in Dropbox")).toBeInTheDocument();
+    expect(screen.getByText("album:vacation")).toBeInTheDocument();
   });
 
   it("calls onClose when Close button clicked", async () => {

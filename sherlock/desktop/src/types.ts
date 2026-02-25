@@ -18,7 +18,6 @@ export type ParsedQuery = {
   dateFrom?: string | null;
   dateTo?: string | null;
   minConfidence?: number | null;
-  rootHints: string[];
   parserConfidence: number;
   albumName?: string | null;
 };
