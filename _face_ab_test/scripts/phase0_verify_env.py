@@ -112,8 +112,8 @@ def main():
     try:
         from deepface import DeepFace
         check("deepface", True)
-    except ImportError:
-        check("deepface", False, "not installed")
+    except (ImportError, ValueError) as e:
+        check("deepface", False, f"not usable — {e}")
 
     # --- GPU ---
     print("\n--- GPU / Acceleration ---")

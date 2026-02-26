@@ -18,7 +18,8 @@
     },
     "yolov8_face": {
       "library": "ultralytics",
-      "model": "yolov8n-face.pt",
+      "model": "yolov8n.pt",
+      "note": "Stock yolov8n detects persons (class 0). Replace with a face-trained .pt for true face detection.",
       "confidence_thresholds": [0.3, 0.5, 0.7, 0.8]
     },
     "mediapipe": {

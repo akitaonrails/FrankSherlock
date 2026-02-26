@@ -79,15 +79,20 @@ def detect_mtcnn(img_rgb: np.ndarray, config: dict) -> list[dict]:
 
 
 def detect_yolov8(img_rgb: np.ndarray, config: dict) -> list[dict]:
-    """YOLOv8-face detector via ultralytics."""
+    """YOLOv8 detector via ultralytics — uses general yolov8n (person class 0) as face proxy.
+
+    Note: A dedicated yolov8-face model requires a custom .pt file. The stock yolov8n
+    detects "person" (class 0) which serves as a baseline comparison. For true face
+    detection, swap the model path in BENCHMARK_CONFIG.json to a face-trained variant.
+    """
     from ultralytics import YOLO
 
     if not hasattr(detect_yolov8, "_model"):
         det_cfg = config.get("detection", {}).get("yolov8_face", {})
-        model_path = det_cfg.get("model", "yolov8n-face.pt")
+        model_path = det_cfg.get("model", "yolov8n.pt")
         detect_yolov8._model = YOLO(model_path)
 
-    preds = detect_yolov8._model(img_rgb, verbose=False)
+    preds = detect_yolov8._model(img_rgb, verbose=False, classes=[0])  # class 0 = person
 
     results = []
     for r in preds:
@@ -102,33 +107,46 @@ def detect_yolov8(img_rgb: np.ndarray, config: dict) -> list[dict]:
 
 
 def detect_mediapipe(img_rgb: np.ndarray, config: dict) -> list[dict]:
-    """MediaPipe Face Detection."""
+    """MediaPipe Face Detection using the Tasks API (0.10.14+)."""
     import mediapipe as mp
 
     if not hasattr(detect_mediapipe, "_detector"):
         det_cfg = config.get("detection", {}).get("mediapipe", {})
-        mp_face = mp.solutions.face_detection
-        detect_mediapipe._detector = mp_face.FaceDetection(
-            model_selection=det_cfg.get("model_selection", 1),
-            min_detection_confidence=det_cfg.get("min_detection_confidence", 0.5),
-        )
+        min_conf = det_cfg.get("min_detection_confidence", 0.5)
 
-    result = detect_mediapipe._detector.process(img_rgb)
+        base_options = mp.tasks.BaseOptions(model_asset_path=_get_mediapipe_model_path())
+        options = mp.tasks.vision.FaceDetectorOptions(
+            base_options=base_options,
+            min_detection_confidence=min_conf,
+            running_mode=mp.tasks.vision.RunningMode.IMAGE,
+        )
+        detect_mediapipe._detector = mp.tasks.vision.FaceDetector.create_from_options(options)
+
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+    result = detect_mediapipe._detector.detect(mp_image)
 
     results = []
-    if result.detections:
-        h, w = img_rgb.shape[:2]
-        for det in result.detections:
-            bb = det.location_data.relative_bounding_box
-            x = int(bb.xmin * w)
-            y = int(bb.ymin * h)
-            bw = int(bb.width * w)
-            bh = int(bb.height * h)
-            results.append({
-                "bbox": [x, y, bw, bh],
-                "confidence": round(float(det.score[0]), 4),
-            })
+    h, w = img_rgb.shape[:2]
+    for det in result.detections:
+        bb = det.bounding_box
+        results.append({
+            "bbox": [bb.origin_x, bb.origin_y, bb.width, bb.height],
+            "confidence": round(float(det.categories[0].score), 4),
+        })
     return results
+
+
+def _get_mediapipe_model_path() -> str:
+    """Download the MediaPipe BlazeFace short-range model if not cached."""
+    import urllib.request
+    cache_dir = Path.home() / ".cache" / "mediapipe"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    model_path = cache_dir / "blaze_face_short_range.tflite"
+    if not model_path.exists():
+        url = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"
+        print(f"  Downloading MediaPipe face model to {model_path}...")
+        urllib.request.urlretrieve(url, model_path)
+    return str(model_path)
 
 
 def _cuda_available() -> bool:
