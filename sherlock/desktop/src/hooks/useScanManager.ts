@@ -207,6 +207,21 @@ export function useScanManager(cb: ScanManagerCallbacks) {
     }
   }
 
+  async function onRefreshRoot(root: RootInfo, readOnly: boolean) {
+    if (readOnly) return;
+    try {
+      setCompletedJobs([]);
+      const job = await startScan(root.rootPath, true);
+      setTrackedJobIds((prev) => [...prev, job.id]);
+      lastProcessedRef.current = 0;
+      cb.setNotice(`Refresh started for ${root.rootName}`);
+      await refreshRoots();
+      await pollRuntimeAndScans();
+    } catch (err) {
+      cb.setError(errorMessage(err));
+    }
+  }
+
   async function onCancelScan(scan: ScanJobStatus, readOnly: boolean) {
     if (readOnly) return;
     try {
@@ -287,6 +302,7 @@ export function useScanManager(cb: ScanManagerCallbacks) {
     initApp,
     onPickAndScan,
     onRescanRoot,
+    onRefreshRoot,
     onCancelScan,
     onResumeScan,
     onResumeAllInterrupted,

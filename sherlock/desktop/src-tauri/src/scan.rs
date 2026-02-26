@@ -57,8 +57,9 @@ pub fn run_scan_job(
     ctx: &ScanContext,
     job_id: i64,
     cancel_flag: Option<&AtomicBool>,
+    skip_classify: bool,
 ) -> AppResult<ScanSummary> {
-    run_scan_job_internal(ctx, job_id, None, cancel_flag)
+    run_scan_job_internal(ctx, job_id, None, cancel_flag, skip_classify)
 }
 
 fn run_scan_job_internal(
@@ -66,6 +67,7 @@ fn run_scan_job_internal(
     job_id: i64,
     max_files_for_test: Option<usize>,
     cancel_flag: Option<&AtomicBool>,
+    skip_classify: bool,
 ) -> AppResult<ScanSummary> {
     let started = Instant::now();
     let db_path = &ctx.db_path;
@@ -418,7 +420,11 @@ fn run_scan_job_internal(
     }
 
     // Phase 3: Classification loop — LLM classify all unclassified files
-    let unclassified = db::list_unclassified_files(db_path, job.root_id, job.scan_marker)?;
+    let unclassified = if skip_classify {
+        vec![]
+    } else {
+        db::list_unclassified_files(db_path, job.root_id, job.scan_marker)?
+    };
     if !unclassified.is_empty() {
         let classify_total = unclassified.len() as u64;
         let mut classify_processed: u64 = 0;
@@ -1030,7 +1036,7 @@ mod tests {
 
         // Set cancel flag before running
         let flag = AtomicBool::new(true);
-        let result = run_scan_job_internal(&ctx, job.id, None, Some(&flag));
+        let result = run_scan_job_internal(&ctx, job.id, None, Some(&flag), false);
         assert!(result.is_ok());
         let summary = result.unwrap();
         // Should return early with minimal processing

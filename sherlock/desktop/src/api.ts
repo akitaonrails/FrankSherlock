@@ -45,8 +45,8 @@ export async function searchImages(request: SearchRequest): Promise<SearchRespon
   return invoke<SearchResponse>("search_images", { request });
 }
 
-export async function startScan(rootPath: string): Promise<ScanJobStatus> {
-  return invoke<ScanJobStatus>("start_scan", { rootPath });
+export async function startScan(rootPath: string, skipClassify?: boolean): Promise<ScanJobStatus> {
+  return invoke<ScanJobStatus>("start_scan", { rootPath, skipClassify });
 }
 
 export async function getScanJob(jobId: number): Promise<ScanJobStatus | null> {

@@ -240,16 +240,22 @@ async fn search_images(
 #[tauri::command]
 fn start_scan(
     root_path: String,
+    skip_classify: Option<bool>,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<ScanJobStatus, String> {
     require_writable(state.inner())?;
-    let setup = compute_setup_status(state.inner());
-    if !setup.is_ready {
-        return Err(
-            "Setup incomplete: ensure Ollama is running and required models are installed."
-                .to_string(),
-        );
+    let skip = skip_classify.unwrap_or(false);
+
+    // Only require Ollama setup for full scans (not metadata-only refreshes)
+    if !skip {
+        let setup = compute_setup_status(state.inner());
+        if !setup.is_ready {
+            return Err(
+                "Setup incomplete: ensure Ollama is running and required models are installed."
+                    .to_string(),
+            );
+        }
     }
 
     let job = scan::start_or_resume_scan_job(&state.paths.db_file, &root_path)
@@ -257,7 +263,7 @@ fn start_scan(
     // If this root is a child of an existing parent root, adopt files from parent
     let _ = db::adopt_child_files(&state.paths.db_file, job.root_id, &job.root_path);
     let app_state = state.inner().clone();
-    spawn_scan_worker_if_needed(app_state, &app_handle, job.id);
+    spawn_scan_worker_if_needed(app_state, &app_handle, job.id, skip);
     db::get_scan_job(&state.paths.db_file, job.id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "scan job not found after start".to_string())
@@ -977,7 +983,12 @@ fn build_scan_context(app_state: &AppState, app_handle: &tauri::AppHandle) -> mo
     }
 }
 
-fn spawn_scan_worker_if_needed(app_state: AppState, app_handle: &tauri::AppHandle, job_id: i64) {
+fn spawn_scan_worker_if_needed(
+    app_state: AppState,
+    app_handle: &tauri::AppHandle,
+    job_id: i64,
+    skip_classify: bool,
+) {
     {
         let mut guard = app_state
             .running_scan_jobs
@@ -1005,7 +1016,7 @@ fn spawn_scan_worker_if_needed(app_state: AppState, app_handle: &tauri::AppHandl
     tauri::async_runtime::spawn(async move {
         let flag = cancel_flag;
         let result = tauri::async_runtime::spawn_blocking(move || {
-            scan::run_scan_job(&scan_ctx, job_id, Some(&flag))
+            scan::run_scan_job(&scan_ctx, job_id, Some(&flag), skip_classify)
         })
         .await
         .map_err(|e| AppError::Join(e.to_string()))

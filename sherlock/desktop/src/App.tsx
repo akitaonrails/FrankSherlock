@@ -949,6 +949,7 @@ export default function App() {
           }}
           onDeleteRoot={(root) => setConfirmDeleteRoot(root)}
           onRescanRoot={(root) => scanManager.onRescanRoot(root, setup, readOnly)}
+          onRefreshRoot={(root) => scanManager.onRefreshRoot(root, readOnly)}
           onCopyRootPath={(root) => {
             copyFilesToClipboard([root.rootPath]).catch(() => {});
             setNotice(`Copied path: ${root.rootPath}`);

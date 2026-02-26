@@ -21,6 +21,7 @@ const defaultProps = {
   onSelectRoot: vi.fn(),
   onDeleteRoot: vi.fn(),
   onRescanRoot: vi.fn(),
+  onRefreshRoot: vi.fn(),
   onCopyRootPath: vi.fn(),
   onPickAndScan: vi.fn(),
   onCancelScan: vi.fn(),
@@ -97,8 +98,18 @@ describe("Sidebar", () => {
     render(<Sidebar {...defaultProps} roots={[sampleRoot]} />);
     const card = screen.getByText("photos").closest(".root-card")!;
     await userEvent.pointer({ keys: "[MouseRight]", target: card });
+    expect(screen.getByRole("menuitem", { name: "Refresh Metadata" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Rescan" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("calls onRefreshRoot from context menu", async () => {
+    const onRefreshRoot = vi.fn();
+    render(<Sidebar {...defaultProps} roots={[sampleRoot]} onRefreshRoot={onRefreshRoot} />);
+    const card = screen.getByText("photos").closest(".root-card")!;
+    await userEvent.pointer({ keys: "[MouseRight]", target: card });
+    await userEvent.click(screen.getByRole("menuitem", { name: "Refresh Metadata" }));
+    expect(onRefreshRoot).toHaveBeenCalledWith(sampleRoot);
   });
 
   it("calls onRescanRoot from context menu", async () => {
