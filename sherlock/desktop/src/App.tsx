@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addFilesToAlbum, cancelScan, copyFilesToClipboard, createAlbum, createSmartFolder,
-  deleteAlbum, deleteFiles, deleteSmartFolder, ensureDatabase, findDuplicates,
+  deleteAlbum, deleteFiles, deleteSmartFolder, detectFaces, ensureDatabase, findDuplicates,
   getCliFolderPath, getFileMetadata, listAlbums, listRoots, listSmartFolders,
   removeRoot, renameFile, reorderAlbums, reorderRoots, reorderSmartFolders,
   startScan, updateFileMetadata,
@@ -540,6 +540,16 @@ export default function App() {
     }
   }
 
+  /* ── Face detection handler ── */
+  async function handleDetectFaces() {
+    try {
+      await detectFaces([]);
+      setNotice("Face detection started");
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   function handleDuplicatesToggleFile(fileId: number) {
     setDuplicatesSelected((prev) => {
       const next = new Set(prev);
@@ -966,6 +976,7 @@ export default function App() {
           onReorderSmartFolders={handleReorderSmartFolders}
           onFindDuplicates={handleFindDuplicates}
           onOpenPdfPasswords={() => { setPdfPasswordsMode(true); setDuplicatesMode(false); }}
+          onDetectFaces={handleDetectFaces}
           updateInfo={updateInfo}
           updateChecking={updateChecking}
           updateDownloading={updateDownloading}

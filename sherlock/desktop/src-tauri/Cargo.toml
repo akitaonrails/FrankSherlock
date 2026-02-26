@@ -45,6 +45,9 @@ sysinfo = "0.34"
 kamadak-exif = "0.6"
 reverse_geocoder = "4"
 pdfium-render = "0.8"
+ort = { version = "2.0.0-rc.11", features = ["ndarray", "load-dynamic"] }
+ndarray = "0.17"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"

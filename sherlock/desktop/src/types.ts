@@ -9,6 +9,7 @@ export type SearchItem = {
   mtimeNs: number;
   sizeBytes: number;
   thumbnailPath?: string | null;
+  faceCount?: number;
 };
 
 export type ParsedQuery = {
@@ -282,4 +283,19 @@ export type DuplicatesResponse = {
   totalDuplicateFiles: number;
   totalWastedBytes: number;
   groups: DuplicateGroup[];
+};
+
+// ── Face detection ──────────────────────────────────────────────────
+
+export type FaceDetectProgress = {
+  total: number;
+  processed: number;
+  facesFound: number;
+};
+
+export type FaceStats = {
+  imagesWithFaces: number;
+  totalFaces: number;
+  imagesScanned: number;
+  imagesPending: number;
 };

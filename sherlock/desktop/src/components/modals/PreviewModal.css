@@ -7,8 +7,8 @@
 
 .preview-modal {
   cursor: default;
-  max-width: 90vw;
-  max-height: 90vh;
+  width: 90vw;
+  height: 90vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
@@ -74,16 +74,17 @@
 
 .preview-image-wrap {
   flex: 1;
-  display: grid;
-  place-items: center;
+  position: relative;
   overflow: hidden;
   min-height: 0;
   background: #000;
 }
 
 .preview-image-wrap img {
-  max-width: 100%;
-  max-height: 100%;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -142,15 +143,15 @@
 .preview-collage[data-count="10"] { grid-template-columns: repeat(5, 1fr); grid-template-rows: 1fr 1fr; }
 
 .preview-collage-cell {
-  display: grid;
-  place-items: center;
+  position: relative;
   overflow: hidden;
   min-height: 0;
-  position: relative;
 }
 .preview-collage-cell img {
-  max-width: 100%;
-  max-height: 100%;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 

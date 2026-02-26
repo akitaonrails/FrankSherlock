@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod error;
 mod exif;
+mod face;
 mod llm;
 mod models;
 mod pdf;
@@ -41,6 +42,8 @@ struct AppState {
     cached_system_python: Option<std::path::PathBuf>,
     cancel_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     cli_folder_path: Option<String>,
+    face_detect_progress: Arc<Mutex<Option<models::FaceDetectProgress>>>,
+    face_detect_cancel: Arc<AtomicBool>,
 }
 
 #[tauri::command]
@@ -802,6 +805,206 @@ fn get_video_stream_url(abs_path: String) -> String {
     video_server::stream_url(&abs_path)
 }
 
+// ── Face detection commands ─────────────────────────────────────────
+
+#[tauri::command]
+fn detect_faces(
+    root_scope: Vec<i64>,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    require_writable(state.inner())?;
+
+    // Check if already running
+    {
+        let progress = state
+            .face_detect_progress
+            .lock()
+            .expect("face progress mutex poisoned");
+        if progress.is_some() {
+            return Err("Face detection is already running".to_string());
+        }
+    }
+
+    // Reset cancel flag
+    state.face_detect_cancel.store(false, Ordering::Relaxed);
+
+    let db_path = state.paths.db_file.clone();
+    let models_dir = state.paths.models_dir.clone();
+    let progress_arc = state.face_detect_progress.clone();
+    let cancel_flag = state.face_detect_cancel.clone();
+    let ort_lib_dir = resolve_ort_lib(&app_handle);
+
+    tauri::async_runtime::spawn(async move {
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            run_face_detection(
+                &db_path,
+                &models_dir,
+                &ort_lib_dir,
+                &root_scope,
+                progress_arc.clone(),
+                &cancel_flag,
+            )
+        })
+        .await;
+
+        if let Err(e) = result {
+            log::error!("Face detection task join error: {e}");
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_face_detect_status(
+    state: State<'_, AppState>,
+) -> Result<Option<models::FaceDetectProgress>, String> {
+    let progress = state
+        .face_detect_progress
+        .lock()
+        .expect("face progress mutex poisoned");
+    Ok(progress.clone())
+}
+
+#[tauri::command]
+fn cancel_face_detect(state: State<'_, AppState>) -> Result<bool, String> {
+    state.face_detect_cancel.store(true, Ordering::Relaxed);
+    Ok(true)
+}
+
+#[tauri::command]
+fn get_face_stats(
+    root_scope: Vec<i64>,
+    state: State<'_, AppState>,
+) -> Result<db::FaceStats, String> {
+    db::get_face_stats(&state.paths.db_file, &root_scope).map_err(|e| e.to_string())
+}
+
+fn resolve_ort_lib(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
+    let lib_name = face::onnxruntime_lib_name();
+
+    // macOS: check Frameworks dir
+    if cfg!(target_os = "macos") {
+        if let Ok(resource_dir) = app_handle.path().resource_dir() {
+            let frameworks_dir = resource_dir.parent().map(|p| p.join("Frameworks"));
+            if let Some(fw) = frameworks_dir {
+                if fw.join(lib_name).exists() {
+                    return fw;
+                }
+            }
+        }
+    }
+
+    // Linux/Windows: check bundled lib/
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let lib_dir = resource_dir.join("lib");
+        if lib_dir.join(lib_name).exists() {
+            return lib_dir;
+        }
+    }
+
+    // Dev fallback: src-tauri/lib/
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib")
+}
+
+fn run_face_detection(
+    db_path: &std::path::Path,
+    models_dir: &std::path::Path,
+    ort_lib_dir: &std::path::Path,
+    root_scope: &[i64],
+    progress_arc: Arc<Mutex<Option<models::FaceDetectProgress>>>,
+    cancel_flag: &AtomicBool,
+) -> Result<(), String> {
+    // Initialize ONNX Runtime
+    let _ = face::init_ort_from_dir(ort_lib_dir).map_err(|e| {
+        log::warn!("ORT init: {e}");
+    });
+
+    // Load face detector
+    let mut detector = face::FaceDetector::new(models_dir).map_err(|e| {
+        let mut progress = progress_arc.lock().expect("face progress mutex poisoned");
+        *progress = None;
+        format!("Failed to initialize face detector: {e}")
+    })?;
+
+    // Get list of files to process
+    let files = db::list_files_needing_face_scan(db_path, root_scope).map_err(|e| {
+        let mut progress = progress_arc.lock().expect("face progress mutex poisoned");
+        *progress = None;
+        format!("Failed to list files: {e}")
+    })?;
+
+    let total = files.len() as u64;
+
+    // Set initial progress
+    {
+        let mut progress = progress_arc.lock().expect("face progress mutex poisoned");
+        *progress = Some(models::FaceDetectProgress {
+            total,
+            processed: 0,
+            faces_found: 0,
+        });
+    }
+
+    let mut processed = 0u64;
+    let mut faces_found = 0u64;
+
+    for file in &files {
+        if cancel_flag.load(Ordering::Relaxed) {
+            log::info!("Face detection cancelled at {processed}/{total}");
+            break;
+        }
+
+        let abs_path = std::path::Path::new(&file.abs_path);
+        if !abs_path.exists() {
+            processed += 1;
+            // Mark as scanned with no faces so we don't retry
+            let _ = db::mark_no_faces(db_path, file.id);
+            continue;
+        }
+
+        match detector.detect(abs_path) {
+            Ok(faces) => {
+                if faces.is_empty() {
+                    let _ = db::mark_no_faces(db_path, file.id);
+                } else {
+                    faces_found += faces.len() as u64;
+                    if let Err(e) = db::insert_face_detections(db_path, file.id, &faces) {
+                        log::warn!("Failed to insert faces for {}: {e}", file.rel_path);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Face detection failed for {}: {e}", file.rel_path);
+                // Mark as scanned so we don't retry
+                let _ = db::mark_no_faces(db_path, file.id);
+            }
+        }
+
+        processed += 1;
+
+        // Update progress
+        {
+            let mut progress = progress_arc.lock().expect("face progress mutex poisoned");
+            *progress = Some(models::FaceDetectProgress {
+                total,
+                processed,
+                faces_found,
+            });
+        }
+    }
+
+    // Clear progress to signal completion
+    {
+        let mut progress = progress_arc.lock().expect("face progress mutex poisoned");
+        *progress = None;
+    }
+
+    log::info!("Face detection complete: {processed}/{total} images, {faces_found} faces found");
+    Ok(())
+}
+
 fn compute_setup_status(app_state: &AppState) -> SetupStatus {
     let (model_tag, model_tier, model_reason) = llm::recommended_model(&app_state.gpu_info);
     let required_models = vec![model_tag.to_string()];
@@ -1132,6 +1335,8 @@ pub fn run() {
         cached_system_python,
         cancel_flags: Arc::new(Mutex::new(HashMap::new())),
         cli_folder_path,
+        face_detect_progress: Arc::new(Mutex::new(None)),
+        face_detect_cancel: Arc::new(AtomicBool::new(false)),
     };
 
     tauri::Builder::default()
@@ -1194,7 +1399,11 @@ pub fn run() {
             list_protected_pdfs,
             retry_protected_pdfs,
             reclassify_pdf,
-            get_video_stream_url
+            get_video_stream_url,
+            detect_faces,
+            get_face_detect_status,
+            cancel_face_detect,
+            get_face_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -81,6 +81,7 @@ pub struct SearchItem {
     pub mtime_ns: i64,
     pub size_bytes: i64,
     pub thumbnail_path: Option<String>,
+    pub face_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -454,4 +455,23 @@ pub struct DuplicatesResponse {
     pub total_duplicate_files: u64,
     pub total_wasted_bytes: i64,
     pub groups: Vec<DuplicateGroup>,
+}
+
+// ── Face detection ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceDetectProgress {
+    pub total: u64,
+    pub processed: u64,
+    pub faces_found: u64,
+}
+
+#[allow(dead_code)] // Used by future clustering/person-naming API
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceDetectResponse {
+    pub total_images: u64,
+    pub processed: u64,
+    pub total_faces: u64,
 }

@@ -35,6 +35,11 @@ export default function ImageTile({ item, index, isSelected, isFocused, onClick,
         {isVideo && (
           <span className="tile-video-badge" aria-label="Video">&#9654;</span>
         )}
+        {item.faceCount != null && item.faceCount > 0 && (
+          <span className="tile-face-badge" aria-label={`${item.faceCount} face${item.faceCount > 1 ? "s" : ""}`}>
+            {item.faceCount}
+          </span>
+        )}
       </div>
       <div className="tile-filename">
         <span>{fileName(item.relPath)}</span>

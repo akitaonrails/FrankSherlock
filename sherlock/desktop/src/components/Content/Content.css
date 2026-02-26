@@ -208,6 +208,21 @@
   line-height: 1;
 }
 
+/* Face count badge overlay */
+.tile-face-badge {
+  position: absolute;
+  bottom: 26px;
+  right: 6px;
+  background: rgba(60, 120, 200, 0.8);
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 8px;
+  pointer-events: none;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
 /* Filename bar — always visible at bottom */
 .tile-filename {
   position: absolute;

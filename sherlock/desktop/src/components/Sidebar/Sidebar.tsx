@@ -37,6 +37,7 @@ type SidebarProps = {
   onReorderSmartFolders?: (ids: number[]) => void;
   onFindDuplicates?: () => void;
   onOpenPdfPasswords?: () => void;
+  onDetectFaces?: () => void;
   updateInfo?: UpdateInfo | null;
   updateChecking?: boolean;
   updateDownloading?: boolean;
@@ -53,7 +54,7 @@ export default function Sidebar({
   onCancelScan, onResumeScan,
   onSelectAlbum, onDeleteAlbum, onSelectSmartFolder, onDeleteSmartFolder,
   onReorderRoots, onReorderAlbums, onReorderSmartFolders, onFindDuplicates,
-  onOpenPdfPasswords,
+  onOpenPdfPasswords, onDetectFaces,
   updateInfo, updateChecking, updateDownloading, updateProgress,
   onCheckUpdates, onInstallUpdate,
 }: SidebarProps) {
@@ -159,7 +160,7 @@ export default function Sidebar({
         )}
       </div>
 
-      {(onFindDuplicates || onOpenPdfPasswords || onCheckUpdates) && (
+      {(onFindDuplicates || onOpenPdfPasswords || onDetectFaces || onCheckUpdates) && (
         <div className="sidebar-tools-fixed">
           <div className="sidebar-section"><span>Tools</span></div>
           <div className="sidebar-tool-list">
@@ -181,6 +182,16 @@ export default function Sidebar({
                 title="Manage passwords for protected PDFs"
               >
                 PDF Passwords
+              </button>
+            )}
+            {onDetectFaces && (
+              <button
+                type="button"
+                className="sidebar-tool-btn"
+                onClick={onDetectFaces}
+                title="Detect faces in all scanned images"
+              >
+                Detect Faces
               </button>
             )}
             {onCheckUpdates && (

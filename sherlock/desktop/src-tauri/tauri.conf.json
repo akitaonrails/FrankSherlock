@@ -56,7 +56,7 @@
       "minimumSystemVersion": "10.15",
       "signingIdentity": null,
       "entitlements": "./Entitlements.plist",
-      "frameworks": ["./lib/libpdfium.dylib"]
+      "frameworks": ["./lib/libpdfium.dylib", "./lib/libonnxruntime.dylib"]
     },
     "windows": {
       "webviewInstallMode": {

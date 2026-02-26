@@ -100,6 +100,44 @@ pub fn extract_exif_details(path: &Path) -> ExifDetails {
     }
 }
 
+/// Read the EXIF Orientation tag (1-8). Returns 1 (normal) on any failure.
+pub fn extract_orientation(path: &Path) -> u16 {
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return 1,
+    };
+    let mut buf_reader = std::io::BufReader::new(file);
+    let exif_data = match exif::Reader::new().read_from_container(&mut buf_reader) {
+        Ok(e) => e,
+        Err(_) => return 1,
+    };
+    match exif_data.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {
+        Some(field) => match &field.value {
+            exif::Value::Short(v) => v.first().copied().unwrap_or(1),
+            _ => 1,
+        },
+        None => 1,
+    }
+}
+
+/// Apply EXIF orientation transform to a decoded image.
+///
+/// EXIF orientation values:
+/// 1 = Normal, 2 = Flip H, 3 = Rotate 180, 4 = Flip V,
+/// 5 = Transpose, 6 = Rotate 90 CW, 7 = Transverse, 8 = Rotate 270 CW
+pub fn apply_orientation(img: image::DynamicImage, orientation: u16) -> image::DynamicImage {
+    match orientation {
+        2 => img.fliph(),
+        3 => img.rotate180(),
+        4 => img.flipv(),
+        5 => img.fliph().rotate90(),
+        6 => img.rotate90(),
+        7 => img.fliph().rotate270(),
+        8 => img.rotate270(),
+        _ => img, // 1 or unknown
+    }
+}
+
 /// Main entry point: extract GPS coordinates from EXIF and reverse geocode.
 pub fn extract_location(path: &Path) -> ExifLocation {
     let Some((lat, lon)) = extract_gps_coords(path) else {
@@ -223,5 +261,60 @@ mod tests {
         let loc = extract_location(Path::new("/nonexistent/file.jpg"));
         assert!(loc.latitude.is_none());
         assert!(loc.location_text.is_empty());
+    }
+
+    #[test]
+    fn extract_orientation_nonexistent_file() {
+        assert_eq!(extract_orientation(Path::new("/nonexistent.jpg")), 1);
+    }
+
+    #[test]
+    fn extract_orientation_non_image() {
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        std::fs::write(tmp.path(), b"not an image").expect("write");
+        assert_eq!(extract_orientation(tmp.path()), 1);
+    }
+
+    #[test]
+    fn apply_orientation_identity() {
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 2));
+        let result = apply_orientation(img.clone(), 1);
+        assert_eq!(result.width(), 4);
+        assert_eq!(result.height(), 2);
+    }
+
+    #[test]
+    fn apply_orientation_rotate90() {
+        // Orientation 6 = rotate 90° CW: (4×2) becomes (2×4)
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 2));
+        let result = apply_orientation(img, 6);
+        assert_eq!(result.width(), 2);
+        assert_eq!(result.height(), 4);
+    }
+
+    #[test]
+    fn apply_orientation_rotate270() {
+        // Orientation 8 = rotate 270° CW: (4×2) becomes (2×4)
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 2));
+        let result = apply_orientation(img, 8);
+        assert_eq!(result.width(), 2);
+        assert_eq!(result.height(), 4);
+    }
+
+    #[test]
+    fn apply_orientation_rotate180() {
+        // Orientation 3 = rotate 180°: dimensions stay the same
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 2));
+        let result = apply_orientation(img, 3);
+        assert_eq!(result.width(), 4);
+        assert_eq!(result.height(), 2);
+    }
+
+    #[test]
+    fn apply_orientation_flip_h() {
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 2));
+        let result = apply_orientation(img, 2);
+        assert_eq!(result.width(), 4);
+        assert_eq!(result.height(), 2);
     }
 }

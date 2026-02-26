@@ -82,6 +82,10 @@ pub fn generate_thumbnail(
         }
     };
 
+    // Apply EXIF orientation so thumbnails match the preview display
+    let orientation = crate::exif::extract_orientation(source_path);
+    let img = crate::exif::apply_orientation(img, orientation);
+
     let dhash = compute_dhash(&img);
 
     let max_dim = 300u32;

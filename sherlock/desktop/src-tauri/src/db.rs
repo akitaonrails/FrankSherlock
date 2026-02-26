@@ -255,6 +255,36 @@ fn run_migrations(conn: &mut Connection) -> AppResult<()> {
         M::up_with_hook("SELECT 1;", |conn| {
             rebuild_fts_with_porter(conn).map_err(|e| HookError::Hook(e.to_string()))
         }),
+        // Migration 11: Face detection tables
+        M::up(
+            r#"
+            CREATE TABLE IF NOT EXISTS people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL DEFAULT '',
+                representative_face_id INTEGER,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS face_detections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER NOT NULL,
+                person_id INTEGER,
+                bbox_x REAL NOT NULL,
+                bbox_y REAL NOT NULL,
+                bbox_w REAL NOT NULL,
+                bbox_h REAL NOT NULL,
+                confidence REAL NOT NULL,
+                embedding BLOB NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE,
+                FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_face_det_file ON face_detections(file_id);
+            CREATE INDEX IF NOT EXISTS idx_face_det_person ON face_detections(person_id);
+
+            ALTER TABLE files ADD COLUMN face_count INTEGER NOT NULL DEFAULT 0;
+            "#,
+        ),
     ]);
 
     migrations
@@ -1606,7 +1636,7 @@ fn search_images_normalized(
     let order_sql = build_order_clause(has_query, &request.sort_by, &request.sort_order);
     let select_sql = format!(
         "SELECT f.id, f.root_id, f.rel_path, f.abs_path, f.media_type, f.description, \
-         f.confidence, f.mtime_ns, f.size_bytes, f.thumb_path{}{}{} LIMIT ? OFFSET ?",
+         f.confidence, f.mtime_ns, f.size_bytes, f.thumb_path, f.face_count{}{}{} LIMIT ? OFFSET ?",
         from_sql, where_sql, order_sql
     );
     let mut select_bind = bind_values;
@@ -1625,6 +1655,7 @@ fn search_images_normalized(
             mtime_ns: row.get(7)?,
             size_bytes: row.get(8)?,
             thumbnail_path: row.get(9)?,
+            face_count: row.get::<_, Option<i64>>(10)?.filter(|&c| c > 0),
         })
     })?;
 
@@ -1735,7 +1766,7 @@ fn search_like_fallback(
     let order_sql = " ORDER BY f.confidence DESC, f.mtime_ns DESC, f.id DESC ";
     let select_sql = format!(
         "SELECT f.id, f.root_id, f.rel_path, f.abs_path, f.media_type, f.description, \
-         f.confidence, f.mtime_ns, f.size_bytes, f.thumb_path{}{}{} LIMIT ? OFFSET ?",
+         f.confidence, f.mtime_ns, f.size_bytes, f.thumb_path, f.face_count{}{}{} LIMIT ? OFFSET ?",
         from_sql, where_sql, order_sql
     );
     let mut select_bind = bind_values;
@@ -1754,6 +1785,7 @@ fn search_like_fallback(
             mtime_ns: row.get(7)?,
             size_bytes: row.get(8)?,
             thumbnail_path: row.get(9)?,
+            face_count: row.get::<_, Option<i64>>(10)?.filter(|&c| c > 0),
         })
     })?;
 
@@ -2256,6 +2288,186 @@ pub fn list_protected_pdfs(db_path: &Path) -> AppResult<Vec<ProtectedPdfInfo>> {
         pdfs.push(row?);
     }
     Ok(pdfs)
+}
+
+// ── Face detection ──────────────────────────────────────────────────
+
+pub fn insert_face_detections(
+    db_path: &Path,
+    file_id: i64,
+    faces: &[crate::face::FaceDetection],
+) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    let now = now_epoch_secs();
+
+    let mut stmt = conn.prepare(
+        "INSERT INTO face_detections (file_id, bbox_x, bbox_y, bbox_w, bbox_h, confidence, embedding, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )?;
+
+    for face in faces {
+        let w = face.bbox[2] - face.bbox[0];
+        let h = face.bbox[3] - face.bbox[1];
+        let blob = crate::face::embedding_to_blob(&face.embedding);
+        stmt.execute(params![
+            file_id,
+            face.bbox[0],
+            face.bbox[1],
+            w,
+            h,
+            face.confidence,
+            blob,
+            now,
+        ])?;
+    }
+
+    // Update face_count on the files table
+    conn.execute(
+        "UPDATE files SET face_count = ?1 WHERE id = ?2",
+        params![faces.len() as i64, file_id],
+    )?;
+
+    Ok(())
+}
+
+#[allow(dead_code)] // Used when re-scanning faces for a file
+pub fn delete_face_detections_for_file(db_path: &Path, file_id: i64) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    conn.execute(
+        "DELETE FROM face_detections WHERE file_id = ?1",
+        params![file_id],
+    )?;
+    conn.execute(
+        "UPDATE files SET face_count = 0 WHERE id = ?1",
+        params![file_id],
+    )?;
+    Ok(())
+}
+
+/// List files that haven't been scanned for faces yet.
+/// Only considers classified images (confidence > 0) whose face_count = 0
+/// and that are image types (not PDFs, videos, etc.).
+pub fn list_files_needing_face_scan(
+    db_path: &Path,
+    root_scope: &[i64],
+) -> AppResult<Vec<crate::models::UnclassifiedFile>> {
+    let conn = open_conn(db_path)?;
+
+    let (scope_clause, scope_params) = if root_scope.is_empty() {
+        ("".to_string(), vec![])
+    } else {
+        let placeholders: Vec<String> = root_scope.iter().map(|_| "?".to_string()).collect();
+        (
+            format!(" AND f.root_id IN ({})", placeholders.join(",")),
+            root_scope.iter().map(|id| Value::from(*id)).collect(),
+        )
+    };
+
+    // face_count = 0 means never scanned; -1 means scanned with no faces; >0 means has faces
+    let sql = format!(
+        "SELECT f.id, f.rel_path, f.abs_path
+         FROM files f
+         WHERE f.deleted_at IS NULL
+           AND f.confidence > 0
+           AND f.face_count = 0
+           AND f.media_type IN ('photo', 'screenshot', 'meme', 'anime', 'illustration')
+           {}
+         ORDER BY f.rel_path",
+        scope_clause
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(scope_params.iter()), |row| {
+        Ok(crate::models::UnclassifiedFile {
+            id: row.get(0)?,
+            rel_path: row.get(1)?,
+            abs_path: row.get(2)?,
+        })
+    })?;
+
+    let mut files = Vec::new();
+    for row in rows {
+        files.push(row?);
+    }
+    Ok(files)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceStats {
+    pub images_with_faces: u64,
+    pub total_faces: u64,
+    pub images_scanned: u64,
+    pub images_pending: u64,
+}
+
+pub fn get_face_stats(db_path: &Path, root_scope: &[i64]) -> AppResult<FaceStats> {
+    let conn = open_conn(db_path)?;
+
+    let (scope_clause, scope_params) = if root_scope.is_empty() {
+        ("".to_string(), vec![])
+    } else {
+        let placeholders: Vec<String> = root_scope.iter().map(|_| "?".to_string()).collect();
+        (
+            format!(" AND f.root_id IN ({})", placeholders.join(",")),
+            root_scope.iter().map(|id| Value::from(*id)).collect(),
+        )
+    };
+
+    let base_where = "f.deleted_at IS NULL AND f.confidence > 0 AND f.media_type IN ('photo', 'screenshot', 'meme', 'anime', 'illustration')";
+
+    // images_with_faces: face_count > 0
+    let sql = format!(
+        "SELECT COUNT(*) FROM files f WHERE {base_where} AND f.face_count > 0{scope_clause}"
+    );
+    let images_with_faces: u64 =
+        conn.query_row(&sql, params_from_iter(scope_params.iter()), |r| r.get(0))?;
+
+    // total_faces: sum of face_count
+    let sql = format!(
+        "SELECT COALESCE(SUM(f.face_count), 0) FROM files f WHERE {base_where} AND f.face_count > 0{scope_clause}"
+    );
+    let total_faces: u64 =
+        conn.query_row(&sql, params_from_iter(scope_params.iter()), |r| r.get(0))?;
+
+    // images_scanned: face_count >= 0 AND has been through face detection
+    // We mark files as scanned by setting face_count to 0 (no faces) or > 0.
+    // But initially face_count defaults to 0, so we need another way...
+    // Actually: we count all image files that have at least one face_detections row OR face_count > 0.
+    // Simpler: count files where id exists in face_detections OR face_count > 0.
+    // Simplest: files with face_count > 0 count as scanned with faces.
+    // For "scanned but no faces" we look at face_count = -1 as a sentinel... but that's ugly.
+    // Let's just use: scanned = total image files - pending
+    let sql = format!("SELECT COUNT(*) FROM files f WHERE {base_where}{scope_clause}");
+    let total_images: u64 =
+        conn.query_row(&sql, params_from_iter(scope_params.iter()), |r| r.get(0))?;
+
+    // pending: face_count = 0 (never scanned for faces; -1 means scanned with no faces)
+    let sql = format!(
+        "SELECT COUNT(*) FROM files f WHERE {base_where} AND f.face_count = 0{scope_clause}"
+    );
+    let images_pending: u64 =
+        conn.query_row(&sql, params_from_iter(scope_params.iter()), |r| r.get(0))?;
+
+    let images_scanned = total_images - images_pending;
+
+    Ok(FaceStats {
+        images_with_faces,
+        total_faces,
+        images_scanned,
+        images_pending,
+    })
+}
+
+/// Mark a file as face-scanned with zero faces found.
+/// Sets face_count to -1 to distinguish from "never scanned" (0).
+pub fn mark_no_faces(db_path: &Path, file_id: i64) -> AppResult<()> {
+    let conn = open_conn(db_path)?;
+    conn.execute(
+        "UPDATE files SET face_count = -1 WHERE id = ?1",
+        params![file_id],
+    )?;
+    Ok(())
 }
 
 // ── Subdirectory listing ────────────────────────────────────────────
@@ -3460,11 +3672,11 @@ mod tests {
         init_database(&db_path).expect("init");
 
         let conn = open_conn(&db_path).expect("open");
-        // Verify user_version is set (11 migrations applied → version 11)
+        // Verify user_version is set (12 migrations applied → version 12)
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .expect("user_version");
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
 
         // Verify all tables exist
         let tables: Vec<String> = {
@@ -3484,6 +3696,8 @@ mod tests {
         assert!(tables.contains(&"album_files".to_string()));
         assert!(tables.contains(&"smart_folders".to_string()));
         assert!(tables.contains(&"pdf_passwords".to_string()));
+        assert!(tables.contains(&"face_detections".to_string()));
+        assert!(tables.contains(&"people".to_string()));
     }
 
     #[test]
@@ -3506,8 +3720,8 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .expect("user_version");
-        // We have 11 migrations (indices 0..10), so user_version should be 11
-        assert_eq!(version, 11);
+        // We have 12 migrations (indices 0..11), so user_version should be 12
+        assert_eq!(version, 12);
     }
 
     #[test]

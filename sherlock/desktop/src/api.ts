@@ -5,6 +5,8 @@ import type {
   DbStats,
   DeleteFilesResult,
   DuplicatesResponse,
+  FaceDetectProgress,
+  FaceStats,
   FileMetadata,
   FileProperties,
   HealthStatus,
@@ -222,4 +224,22 @@ export async function reclassifyPdf(fileId: number): Promise<boolean> {
 
 export async function getVideoStreamUrl(absPath: string): Promise<string> {
   return invoke<string>("get_video_stream_url", { absPath });
+}
+
+// ── Face Detection ──────────────────────────────────────────────────
+
+export async function detectFaces(rootScope: number[] = []): Promise<void> {
+  return invoke<void>("detect_faces", { rootScope });
+}
+
+export async function getFaceDetectStatus(): Promise<FaceDetectProgress | null> {
+  return invoke<FaceDetectProgress | null>("get_face_detect_status");
+}
+
+export async function cancelFaceDetect(): Promise<boolean> {
+  return invoke<boolean>("cancel_face_detect");
+}
+
+export async function getFaceStats(rootScope: number[] = []): Promise<FaceStats> {
+  return invoke<FaceStats>("get_face_stats", { rootScope });
 }

@@ -16,6 +16,7 @@ pub struct AppPaths {
     pub scans_dir: PathBuf,
     pub surya_venv_dir: PathBuf,
     pub tmp_dir: PathBuf,
+    pub models_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -50,6 +51,7 @@ pub fn resolve_paths() -> AppResult<AppPaths> {
     let surya_venv_dir = base_dir.join("surya_venv");
     let tmp_dir = cache_dir.join("tmp");
     let db_file = db_dir.join("index.sqlite");
+    let models_dir = base_dir.join("models");
 
     Ok(AppPaths {
         base_dir,
@@ -61,6 +63,7 @@ pub fn resolve_paths() -> AppResult<AppPaths> {
         scans_dir,
         surya_venv_dir,
         tmp_dir,
+        models_dir,
     })
 }
 
@@ -73,6 +76,7 @@ pub fn prepare_dirs(paths: &AppPaths) -> AppResult<()> {
     std::fs::create_dir_all(&paths.scans_dir)?;
     std::fs::create_dir_all(&paths.surya_venv_dir)?;
     std::fs::create_dir_all(&paths.tmp_dir)?;
+    std::fs::create_dir_all(&paths.models_dir)?;
     Ok(())
 }
 
