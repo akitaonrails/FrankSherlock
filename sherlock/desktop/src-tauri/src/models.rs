@@ -477,15 +477,6 @@ pub struct FaceDetectProgress {
     pub phase: String,
 }
 
-#[allow(dead_code)] // Used by future clustering/person-naming API
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FaceDetectResponse {
-    pub total_images: u64,
-    pub processed: u64,
-    pub total_faces: u64,
-}
-
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersonInfo {

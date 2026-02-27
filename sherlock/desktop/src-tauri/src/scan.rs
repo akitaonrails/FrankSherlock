@@ -866,6 +866,13 @@ fn cleanup_deleted_caches(db_path: &Path, root_id: i64, deleted_at: i64, thumbna
         ));
         let _ = std::fs::remove_file(&expected_thumb);
     }
+
+    // Remove face crop files for deleted files
+    if let Ok(crop_paths) = db::get_face_crop_paths_for_deleted(db_path, root_id, deleted_at) {
+        for cp in &crop_paths {
+            let _ = std::fs::remove_file(cp);
+        }
+    }
 }
 
 fn fingerprint_file(path: &Path, size: u64) -> AppResult<String> {

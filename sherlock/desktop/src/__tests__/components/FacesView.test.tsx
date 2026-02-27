@@ -450,4 +450,159 @@ describe("FacesView", () => {
       expect(screen.getByText("Alice (3)")).toBeInTheDocument();
     });
   });
+
+  it("ctrl+click toggles multi-select", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_persons") return [mockPerson];
+      if (cmd === "list_faces_for_person") return [mockFace1, mockFace2];
+      return null;
+    });
+
+    render(<FacesView {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText("Person 1")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText("Person 1").closest(".faces-card")!);
+    await waitFor(() => {
+      expect(screen.getByText("face_a.jpg")).toBeInTheDocument();
+    });
+
+    const card1 = screen.getByText("face_a.jpg").closest(".faces-detail-card")!;
+    const card2 = screen.getByText("face_b.jpg").closest(".faces-detail-card")!;
+
+    // Click first card
+    await userEvent.click(card1);
+    expect(card1.classList.contains("selected")).toBe(true);
+    expect(card2.classList.contains("selected")).toBe(false);
+
+    // Ctrl+click second card
+    fireEvent.click(card2, { ctrlKey: true });
+    expect(card1.classList.contains("selected")).toBe(true);
+    expect(card2.classList.contains("selected")).toBe(true);
+
+    // Ctrl+click first card again to deselect
+    fireEvent.click(card1, { ctrlKey: true });
+    expect(card1.classList.contains("selected")).toBe(false);
+    expect(card2.classList.contains("selected")).toBe(true);
+  });
+
+  it("Ctrl+A selects all faces in detail view", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_persons") return [mockPerson];
+      if (cmd === "list_faces_for_person") return [mockFace1, mockFace2];
+      return null;
+    });
+
+    render(<FacesView {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText("Person 1")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText("Person 1").closest(".faces-card")!);
+    await waitFor(() => {
+      expect(screen.getByText("face_a.jpg")).toBeInTheDocument();
+    });
+
+    // Press Ctrl+A
+    await userEvent.keyboard("{Control>}a{/Control}");
+
+    const card1 = screen.getByText("face_a.jpg").closest(".faces-detail-card")!;
+    const card2 = screen.getByText("face_b.jpg").closest(".faces-detail-card")!;
+    expect(card1.classList.contains("selected")).toBe(true);
+    expect(card2.classList.contains("selected")).toBe(true);
+    // Toolbar should show selection count
+    expect(screen.getByText(/2 selected/)).toBeInTheDocument();
+  });
+
+  it("Delete key removes selected faces from person", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_persons") return [mockPerson];
+      if (cmd === "list_faces_for_person") return [mockFace1, mockFace2];
+      if (cmd === "unassign_face_from_person") return null;
+      return null;
+    });
+
+    render(<FacesView {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText("Person 1")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText("Person 1").closest(".faces-card")!);
+    await waitFor(() => {
+      expect(screen.getByText("face_a.jpg")).toBeInTheDocument();
+    });
+
+    // Select first face and press Delete
+    const card = screen.getByText("face_a.jpg").closest(".faces-detail-card")!;
+    await userEvent.click(card);
+    await userEvent.keyboard("{Delete}");
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("unassign_face_from_person", { faceId: 10 });
+    });
+  });
+
+  it("Space previews selected faces", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_persons") return [mockPerson];
+      if (cmd === "list_faces_for_person") return [mockFace1, mockFace2];
+      return null;
+    });
+
+    render(<FacesView {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText("Person 1")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText("Person 1").closest(".faces-card")!);
+    await waitFor(() => {
+      expect(screen.getByText("face_a.jpg")).toBeInTheDocument();
+    });
+
+    // Select first face and press Space
+    const card = screen.getByText("face_a.jpg").closest(".faces-detail-card")!;
+    await userEvent.click(card);
+    await userEvent.keyboard(" ");
+
+    expect(defaultProps.onPreviewFile).toHaveBeenCalledWith([100]);
+  });
+
+  it("Move to action calls reassign_faces_to_person", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_persons") return [mockPerson, mockPerson2];
+      if (cmd === "list_faces_for_person") return [mockFace1, mockFace2];
+      if (cmd === "reassign_faces_to_person") return null;
+      return null;
+    });
+
+    render(<FacesView {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByText("Person 1")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText("Person 1").closest(".faces-card")!);
+    await waitFor(() => {
+      expect(screen.getByText("face_a.jpg")).toBeInTheDocument();
+    });
+
+    // Select first face, right-click, click "Alice (3)" in Move to submenu
+    const card = screen.getByText("face_a.jpg").closest(".faces-detail-card")!;
+    await userEvent.click(card);
+    fireEvent.contextMenu(card);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice (3)")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText("Alice (3)"));
+
+    await waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("reassign_faces_to_person", {
+        faceIds: [10],
+        targetPersonId: 2,
+      });
+      expect(defaultProps.onNotice).toHaveBeenCalledWith('Moved 1 face(s) to Alice');
+    });
+  });
 });

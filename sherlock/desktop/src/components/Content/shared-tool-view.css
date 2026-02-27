@@ -1,0 +1,70 @@
+/* ── Shared tool-view layout ─────────────────────────────
+   Base classes for DuplicatesView, FacesView, PdfPasswordsView, etc.
+   Each view imports this file + its own CSS for component-specific styles. */
+
+.tool-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────── */
+.tool-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-surface);
+  align-items: center;
+}
+
+.tool-toolbar-stats {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.tool-toolbar-stats strong {
+  color: var(--text-primary);
+}
+
+.tool-toolbar button {
+  padding: 4px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.tool-toolbar button:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+}
+
+.tool-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Body ────────────────────────────────────────────────── */
+.tool-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+.tool-empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-secondary);
+}
+
+.tool-loading {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-secondary);
+}

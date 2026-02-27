@@ -1,83 +1,19 @@
-/* ── DuplicatesView ──────────────────────────────────────── */
-.duplicates-view {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+/* ── DuplicatesView — component-specific styles ─────────── */
+/* Base layout (.tool-view, .tool-toolbar, .tool-body, etc.)
+   is in shared-tool-view.css */
 
-/* ── Toolbar ─────────────────────────────────────────────── */
-.duplicates-toolbar {
-  display: flex;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-primary);
-  background: var(--bg-surface);
-  align-items: center;
-}
-
-.duplicates-stats {
-  flex: 1;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.duplicates-stats strong {
-  color: var(--text-primary);
-}
-
-.duplicates-toolbar button {
-  padding: 4px 10px;
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
-}
-
-.duplicates-toolbar button:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-focus);
-}
-
-.duplicates-toolbar button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.duplicates-toolbar .danger-btn {
+.tool-toolbar .danger-btn {
   background: var(--danger);
   border-color: var(--danger);
   color: #fff;
 }
 
-.duplicates-toolbar .danger-btn:hover {
+.tool-toolbar .danger-btn:hover {
   opacity: 0.9;
 }
 
-.duplicates-toolbar .danger-btn:disabled {
+.tool-toolbar .danger-btn:disabled {
   opacity: 0.4;
-}
-
-/* ── Body ────────────────────────────────────────────────── */
-.duplicates-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 12px;
-}
-
-.duplicates-empty {
-  text-align: center;
-  padding: 48px 20px;
-  color: var(--text-secondary);
-}
-
-.duplicates-loading {
-  text-align: center;
-  padding: 48px 20px;
-  color: var(--text-secondary);
 }
 
 /* ── Group card ──────────────────────────────────────────── */

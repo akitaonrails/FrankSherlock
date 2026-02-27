@@ -2266,42 +2266,15 @@ pub fn list_smart_folders(db_path: &Path) -> AppResult<Vec<SmartFolder>> {
 }
 
 pub fn reorder_roots(db_path: &Path, ids: &[i64]) -> AppResult<()> {
-    let conn = open_conn(db_path)?;
-    let tx = conn.unchecked_transaction()?;
-    for (i, id) in ids.iter().enumerate() {
-        tx.execute(
-            "UPDATE roots SET sort_order = ?1 WHERE id = ?2",
-            params![i as i64, id],
-        )?;
-    }
-    tx.commit()?;
-    Ok(())
+    reorder_items(&open_conn(db_path)?, "roots", ids)
 }
 
 pub fn reorder_albums(db_path: &Path, ids: &[i64]) -> AppResult<()> {
-    let conn = open_conn(db_path)?;
-    let tx = conn.unchecked_transaction()?;
-    for (i, id) in ids.iter().enumerate() {
-        tx.execute(
-            "UPDATE albums SET sort_order = ?1 WHERE id = ?2",
-            params![i as i64, id],
-        )?;
-    }
-    tx.commit()?;
-    Ok(())
+    reorder_items(&open_conn(db_path)?, "albums", ids)
 }
 
 pub fn reorder_smart_folders(db_path: &Path, ids: &[i64]) -> AppResult<()> {
-    let conn = open_conn(db_path)?;
-    let tx = conn.unchecked_transaction()?;
-    for (i, id) in ids.iter().enumerate() {
-        tx.execute(
-            "UPDATE smart_folders SET sort_order = ?1 WHERE id = ?2",
-            params![i as i64, id],
-        )?;
-    }
-    tx.commit()?;
-    Ok(())
+    reorder_items(&open_conn(db_path)?, "smart_folders", ids)
 }
 
 // ── PDF Passwords ───────────────────────────────────────────────────
@@ -2445,19 +2418,6 @@ pub fn update_face_crop_path(db_path: &Path, face_id: i64, crop_path: &str) -> A
 }
 
 #[allow(dead_code)] // Used when re-scanning faces for a file
-pub fn delete_face_detections_for_file(db_path: &Path, file_id: i64) -> AppResult<()> {
-    let conn = open_conn(db_path)?;
-    conn.execute(
-        "DELETE FROM face_detections WHERE file_id = ?1",
-        params![file_id],
-    )?;
-    conn.execute(
-        "UPDATE files SET face_count = 0 WHERE id = ?1",
-        params![file_id],
-    )?;
-    Ok(())
-}
-
 /// List files that haven't been scanned for faces yet for a specific root.
 /// Includes any image file (by extension or classified media_type), regardless
 /// of whether it has been through LLM classification yet.
@@ -2818,29 +2778,19 @@ pub fn unassign_face_from_person(db_path: &Path, face_id: i64) -> AppResult<()> 
         params![face_id],
     )?;
 
-    // Check if person still has faces
-    let remaining: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM face_detections WHERE person_id = ?1",
-        params![pid],
-        |row| row.get(0),
-    )?;
-
-    if remaining == 0 {
-        // Delete person if no faces remain
-        conn.execute("DELETE FROM people WHERE id = ?1", params![pid])?;
-    } else if is_representative {
-        // Update representative to next best face with crop
-        conn.execute(
-            "UPDATE people SET representative_face_id = COALESCE(
-                (SELECT fd.id FROM face_detections fd
-                 WHERE fd.person_id = ?1 AND fd.crop_path IS NOT NULL
-                 ORDER BY fd.confidence DESC LIMIT 1),
-                (SELECT fd.id FROM face_detections fd
-                 WHERE fd.person_id = ?1
-                 ORDER BY fd.confidence DESC LIMIT 1)
-            ) WHERE id = ?1",
+    if is_representative {
+        // Always cleanup when the representative was removed
+        cleanup_person_after_face_removal(&conn, pid)?;
+    } else {
+        // Only delete if empty (rep is still valid)
+        let remaining: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM face_detections WHERE person_id = ?1",
             params![pid],
+            |row| row.get(0),
         )?;
+        if remaining == 0 {
+            conn.execute("DELETE FROM people WHERE id = ?1", params![pid])?;
+        }
     }
 
     Ok(())
@@ -2855,15 +2805,8 @@ pub fn merge_persons(db_path: &Path, source_id: i64, target_id: i64) -> AppResul
     )?;
     // Delete the source person
     conn.execute("DELETE FROM people WHERE id = ?1", params![source_id])?;
-    // Update representative_face_id on target (highest confidence with crop)
-    conn.execute(
-        "UPDATE people SET representative_face_id = (
-            SELECT fd.id FROM face_detections fd
-            WHERE fd.person_id = ?1 AND fd.crop_path IS NOT NULL
-            ORDER BY fd.confidence DESC LIMIT 1
-        ) WHERE id = ?1",
-        params![target_id],
-    )?;
+    // Update representative on target
+    refresh_person_representative(&conn, target_id)?;
     Ok(())
 }
 
@@ -2916,33 +2859,20 @@ pub fn reassign_faces_to_person(
         conn.execute(&sql, params_from_iter(params))?;
     }
 
-    // Clean up source persons
+    // Clean up source persons (delete if empty, else refresh representative)
     for source_id in &source_person_ids {
-        let remaining: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM face_detections WHERE person_id = ?1",
-            params![source_id],
-            |row| row.get(0),
-        )?;
-
-        if remaining == 0 {
-            conn.execute("DELETE FROM people WHERE id = ?1", params![source_id])?;
-        } else {
-            // Update representative for source person
-            conn.execute(
-                "UPDATE people SET representative_face_id = COALESCE(
-                    (SELECT fd.id FROM face_detections fd
-                     WHERE fd.person_id = ?1 AND fd.crop_path IS NOT NULL
-                     ORDER BY fd.confidence DESC LIMIT 1),
-                    (SELECT fd.id FROM face_detections fd
-                     WHERE fd.person_id = ?1
-                     ORDER BY fd.confidence DESC LIMIT 1)
-                ) WHERE id = ?1",
-                params![source_id],
-            )?;
-        }
+        cleanup_person_after_face_removal(&conn, *source_id)?;
     }
 
     // Update representative for target person
+    refresh_person_representative(&conn, target_person_id)?;
+
+    Ok(())
+}
+
+/// Update representative_face_id for a person: prefer face with crop, fall back
+/// to highest confidence. Used after face reassignment, unassignment, and merge.
+fn refresh_person_representative(conn: &Connection, person_id: i64) -> AppResult<()> {
     conn.execute(
         "UPDATE people SET representative_face_id = COALESCE(
             (SELECT fd.id FROM face_detections fd
@@ -2952,9 +2882,35 @@ pub fn reassign_faces_to_person(
              WHERE fd.person_id = ?1
              ORDER BY fd.confidence DESC LIMIT 1)
         ) WHERE id = ?1",
-        params![target_person_id],
+        params![person_id],
     )?;
+    Ok(())
+}
 
+/// After removing faces from a person, delete the person if empty or refresh
+/// their representative. Returns true if the person was deleted.
+fn cleanup_person_after_face_removal(conn: &Connection, person_id: i64) -> AppResult<bool> {
+    let remaining: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM face_detections WHERE person_id = ?1",
+        params![person_id],
+        |row| row.get(0),
+    )?;
+    if remaining == 0 {
+        conn.execute("DELETE FROM people WHERE id = ?1", params![person_id])?;
+        Ok(true)
+    } else {
+        refresh_person_representative(conn, person_id)?;
+        Ok(false)
+    }
+}
+
+fn reorder_items(conn: &Connection, table: &str, ids: &[i64]) -> AppResult<()> {
+    let sql = format!("UPDATE {table} SET sort_order = ?1 WHERE id = ?2");
+    let tx = conn.unchecked_transaction()?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(&sql, params![i as i64, id])?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -6773,6 +6729,32 @@ mod tests {
             )
             .expect("query");
         assert_eq!(pb_count, 2);
+    }
+
+    #[test]
+    fn reassign_faces_to_person_empty_ids_is_noop() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        // Even without any people, empty ids should succeed
+        reassign_faces_to_person(&db_path, &[], 999).expect("should be noop");
+    }
+
+    #[test]
+    fn reassign_faces_to_person_invalid_target_returns_error() {
+        let (_dir, db_path) = test_db_path();
+        init_database(&db_path).expect("init");
+        let root_id = upsert_root(&db_path, "/tmp/reassign_err").expect("root");
+
+        let rec = sample_record(root_id, "img.jpg", "fp-err");
+        upsert_file_record(&db_path, &rec).expect("upsert");
+        let fid = file_id_by_path(&db_path, root_id, "img.jpg");
+        let face_id = insert_test_face(&db_path, fid, &vec![0.1_f32; 512]);
+
+        let result = reassign_faces_to_person(&db_path, &[face_id], 99999);
+        assert!(
+            result.is_err(),
+            "Should fail when target person doesn't exist"
+        );
     }
 
     // ── Face crop cleanup + representative face tests ─────────

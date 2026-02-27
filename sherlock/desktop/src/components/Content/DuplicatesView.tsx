@@ -2,6 +2,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { DuplicatesResponse, DuplicateFile, DuplicateGroup } from "../../types";
 import { fileName } from "../../utils/format";
 import { formatBytes } from "../../utils/format";
+import "./shared-tool-view.css";
 import "./DuplicatesView.css";
 
 type Props = {
@@ -33,9 +34,9 @@ export default function DuplicatesView({
   onBack, onSelectGroupDuplicates, onPreviewGroup,
 }: Props) {
   return (
-    <div className="duplicates-view">
-      <div className="duplicates-toolbar">
-        <div className="duplicates-stats">
+    <div className="tool-view">
+      <div className="tool-toolbar">
+        <div className="tool-toolbar-stats">
           <strong>{data.totalGroups}</strong> group{data.totalGroups !== 1 ? "s" : ""},
           {" "}<strong>{data.totalDuplicateFiles}</strong> duplicate{data.totalDuplicateFiles !== 1 ? "s" : ""},
           {" "}<strong>{formatBytes(data.totalWastedBytes)}</strong> wasted
@@ -78,10 +79,10 @@ export default function DuplicatesView({
         <button type="button" onClick={onBack}>Back</button>
       </div>
 
-      <div className="duplicates-body">
-        {loading && <div className="duplicates-loading">Searching for duplicates...</div>}
+      <div className="tool-body">
+        {loading && <div className="tool-loading">Searching for duplicates...</div>}
         {!loading && data.totalGroups === 0 && (
-          <div className="duplicates-empty">No duplicate files found.</div>
+          <div className="tool-empty">No duplicate files found.</div>
         )}
         {data.groups.map((group) => (
           <GroupCard

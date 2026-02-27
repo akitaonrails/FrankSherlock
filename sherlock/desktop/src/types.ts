@@ -295,13 +295,6 @@ export type FaceDetectProgress = {
   phase: "downloading" | "loading" | "detecting";
 };
 
-export type FaceStats = {
-  imagesWithFaces: number;
-  totalFaces: number;
-  imagesScanned: number;
-  imagesPending: number;
-};
-
 export type PersonInfo = {
   id: number;
   name: string;

@@ -8,6 +8,7 @@ import {
   retryProtectedPdfs,
 } from "../../api";
 import { basename } from "../../utils";
+import "./shared-tool-view.css";
 import "./PdfPasswordsView.css";
 
 type Props = {
@@ -92,16 +93,16 @@ export default function PdfPasswordsView({ onBack, onNotice, onError }: Props) {
   }
 
   return (
-    <div className="pdf-passwords-view">
-      <div className="pdf-passwords-toolbar">
-        <div className="pdf-passwords-stats">
+    <div className="tool-view">
+      <div className="tool-toolbar">
+        <div className="tool-toolbar-stats">
           <strong>{passwords.length}</strong> saved password{passwords.length !== 1 ? "s" : ""},
           {" "}<strong>{protectedPdfs.length}</strong> protected PDF{protectedPdfs.length !== 1 ? "s" : ""}
         </div>
         <button type="button" onClick={onBack}>Back</button>
       </div>
 
-      <div className="pdf-passwords-body">
+      <div className="tool-body">
         <div className="pdf-passwords-warning">
           Passwords are stored in plain text in the local database.
           Only save passwords you are comfortable storing unencrypted.

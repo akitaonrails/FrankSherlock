@@ -71,6 +71,11 @@ jobs:
         shell: bash
         run: bash scripts/download-pdfium.sh
 
+      - name: Download ONNX Runtime
+        working-directory: sherlock/desktop/src-tauri
+        shell: bash
+        run: bash scripts/download-onnxruntime.sh
+
       - name: Run Rust tests
         working-directory: sherlock/desktop/src-tauri
         run: cargo test

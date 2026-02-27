@@ -1,14 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Album,
-  AppPaths,
   ClusterResult,
   DbStats,
   DeleteFilesResult,
   DuplicatesResponse,
   FaceDetectProgress,
   FaceInfo,
-  FaceStats,
   FileMetadata,
   FileProperties,
   HealthStatus,
@@ -26,7 +24,6 @@ import type {
   SetupStatus,
   SmartFolder,
   SubdirEntry,
-  SearchItem,
   SearchRequest,
   SearchResponse,
   VenvProvisionStatus,
@@ -42,10 +39,6 @@ export async function getCliFolderPath(): Promise<string | null> {
 
 export async function ensureDatabase(): Promise<DbStats> {
   return invoke<DbStats>("ensure_database");
-}
-
-export async function getPaths(): Promise<AppPaths> {
-  return invoke<AppPaths>("get_app_paths");
 }
 
 export async function searchImages(request: SearchRequest): Promise<SearchResponse> {
@@ -155,10 +148,6 @@ export async function addFilesToAlbum(albumId: number, fileIds: number[]): Promi
   return invoke<number>("add_files_to_album", { albumId, fileIds });
 }
 
-export async function removeFilesFromAlbum(albumId: number, fileIds: number[]): Promise<number> {
-  return invoke<number>("remove_files_from_album", { albumId, fileIds });
-}
-
 // ── Smart Folders ───────────────────────────────────────────────────
 
 export async function createSmartFolder(name: string, query: string): Promise<SmartFolder> {
@@ -245,14 +234,6 @@ export async function cancelFaceDetect(): Promise<boolean> {
   return invoke<boolean>("cancel_face_detect");
 }
 
-export async function getFaceStats(rootScope: number[] = []): Promise<FaceStats> {
-  return invoke<FaceStats>("get_face_stats", { rootScope });
-}
-
-export async function listFilesWithFaces(rootScope: number[] = []): Promise<SearchItem[]> {
-  return invoke<SearchItem[]>("list_files_with_faces", { rootScope });
-}
-
 // ── Person / Clustering ─────────────────────────────────────────────
 
 export async function clusterFaces(): Promise<ClusterResult> {
@@ -273,10 +254,6 @@ export async function listPersons(rootScope: number[] = []): Promise<PersonInfo[
 
 export async function renamePerson(personId: number, newName: string): Promise<void> {
   return invoke<void>("rename_person", { personId, newName });
-}
-
-export async function mergePersons(sourceId: number, targetId: number): Promise<void> {
-  return invoke<void>("merge_persons", { sourceId, targetId });
 }
 
 export async function listFacesForPerson(personId: number): Promise<FaceInfo[]> {

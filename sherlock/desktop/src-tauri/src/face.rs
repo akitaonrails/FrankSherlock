@@ -601,23 +601,15 @@ pub fn init_ort_from_dir(lib_dir: &Path) -> AppResult<bool> {
 
 // ── Face crop generation ────────────────────────────────────────────
 
-/// Generate a small JPEG face crop for display in the person grid.
-/// Takes the source image, bbox `[x1, y1, x2, y2]`, output directory, and face_id.
-/// Adds 20% padding around the face, resizes longest side to 150px.
-/// Returns the output path on success.
-pub fn generate_face_crop(
-    image_path: &Path,
+/// Crop a single face from an already-decoded image (avoids re-opening the file).
+/// Takes bbox `[x1, y1, x2, y2]`, adds 20% padding, resizes longest side to 150px JPEG.
+pub fn crop_face_from_image(
+    img: &image::DynamicImage,
     bbox: &[f32; 4],
     output_dir: &Path,
     face_id: i64,
 ) -> AppResult<PathBuf> {
-    let raw_img = image::open(image_path)
-        .map_err(|e| AppError::Config(format!("Failed to open image for face crop: {e}")))?;
-    let orientation = crate::exif::extract_orientation(image_path);
-    let img = crate::exif::apply_orientation(raw_img, orientation);
-
     let (img_w, img_h) = (img.width() as f32, img.height() as f32);
-
     let face_w = bbox[2] - bbox[0];
     let face_h = bbox[3] - bbox[1];
     let pad_x = face_w * 0.2;
@@ -633,7 +625,6 @@ pub fn generate_face_crop(
 
     let cropped = img.crop_imm(x1, y1, crop_w, crop_h);
 
-    // Resize longest side to 150px
     let longest = crop_w.max(crop_h) as f32;
     let scale = 150.0 / longest;
     let new_w = ((crop_w as f32 * scale).round() as u32).max(1);
@@ -645,8 +636,84 @@ pub fn generate_face_crop(
         .to_rgb8()
         .save_with_format(&out_path, image::ImageFormat::Jpeg)
         .map_err(|e| AppError::Config(format!("Failed to save face crop: {e}")))?;
-
     Ok(out_path)
+}
+
+/// Result from a single face crop within a batch.
+pub struct BatchCropResult {
+    pub face_id: i64,
+    pub result: AppResult<PathBuf>,
+}
+
+/// Generate face crops grouped by source image — each image is decoded only once.
+/// `on_progress` is called after each face is processed with the running total.
+pub fn generate_face_crops_batch<F>(
+    jobs: &[crate::models::FaceCropJob],
+    output_dir: &Path,
+    mut on_progress: F,
+) -> Vec<BatchCropResult>
+where
+    F: FnMut(usize),
+{
+    use std::collections::HashMap;
+
+    // Group jobs by source image path
+    let mut by_image: HashMap<&str, Vec<&crate::models::FaceCropJob>> = HashMap::new();
+    for job in jobs {
+        by_image.entry(&job.abs_path).or_default().push(job);
+    }
+
+    let mut results = Vec::with_capacity(jobs.len());
+    let mut done = 0usize;
+
+    for (abs_path, faces) in &by_image {
+        let path = Path::new(abs_path);
+        if !path.exists() {
+            for face_job in faces {
+                results.push(BatchCropResult {
+                    face_id: face_job.face_id,
+                    result: Err(AppError::Config(format!(
+                        "Source image not found: {abs_path}"
+                    ))),
+                });
+                done += 1;
+                on_progress(done);
+            }
+            continue;
+        }
+
+        // Open + EXIF-orient the image ONCE
+        let img = match image::open(path) {
+            Ok(raw) => {
+                let orientation = crate::exif::extract_orientation(path);
+                crate::exif::apply_orientation(raw, orientation)
+            }
+            Err(e) => {
+                for face_job in faces {
+                    results.push(BatchCropResult {
+                        face_id: face_job.face_id,
+                        result: Err(AppError::Config(format!("Failed to open image: {e}"))),
+                    });
+                    done += 1;
+                    on_progress(done);
+                }
+                continue;
+            }
+        };
+
+        // Crop all faces from this one decoded image
+        for face_job in faces {
+            let result = crop_face_from_image(&img, &face_job.bbox, output_dir, face_job.face_id);
+            results.push(BatchCropResult {
+                face_id: face_job.face_id,
+                result,
+            });
+            done += 1;
+            on_progress(done);
+        }
+    }
+
+    results
 }
 
 // ── Embedding helpers ───────────────────────────────────────────────

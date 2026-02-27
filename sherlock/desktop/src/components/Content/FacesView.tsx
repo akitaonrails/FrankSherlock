@@ -12,6 +12,8 @@ import {
   setRepresentativeFace,
 } from "../../api";
 import { useSelection } from "../../hooks/useSelection";
+import { useContextMenuClose } from "../../hooks/useContextMenuClose";
+import "./shared-tool-view.css";
 import "./FacesView.css";
 import "../Content/ContextMenu.css";
 
@@ -126,39 +128,14 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
     }
   }, [editingId]);
 
-  // Close person grid context menu on click-outside or Escape
-  useEffect(() => {
-    if (!contextMenu) return;
-    function handleClick() {
-      setContextMenuState(null);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setContextMenuState(null);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [contextMenu]);
-
-  // Close detail context menu on click-outside or Escape
-  useEffect(() => {
-    if (!detailContextMenu) return;
-    function handleClick() {
-      setDetailContextMenu(null);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setDetailContextMenu(null);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [detailContextMenu]);
+  // Close context menus on click-outside or Escape
+  const closeContextMenu = useCallback(() => {
+    contextMenuRef.current = null;
+    setContextMenu(null);
+  }, []);
+  const closeDetailContextMenu = useCallback(() => setDetailContextMenu(null), []);
+  useContextMenuClose(contextMenu !== null, closeContextMenu);
+  useContextMenuClose(detailContextMenu !== null, closeDetailContextMenu);
 
   // Keyboard shortcuts in detail view
   useEffect(() => {
@@ -260,26 +237,34 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
       .finally(() => setFacesLoading(false));
   }
 
-  // ── Detail view: bulk unassign ────────────────────────────────────
-  async function handleBulkUnassign() {
-    const faceIds = [...detailSelected]
+  // ── Detail view helpers ──────────────────────────────────────────
+  function getSelectedFaceIds(): number[] {
+    return [...detailSelected]
       .sort((a, b) => a - b)
       .filter((i) => i < faces.length)
       .map((i) => faces[i].id);
+  }
+
+  function applyFaceRemoval(faceIds: number[], extraCacheInvalidation?: number) {
+    const remaining = faces.filter((f) => !faceIds.includes(f.id));
+    setFaces(remaining);
+    detailClearSelection();
+    if (selectedPerson) scrubFacesCache.current.delete(selectedPerson.id);
+    if (extraCacheInvalidation !== undefined) scrubFacesCache.current.delete(extraCacheInvalidation);
+    loadPersons();
+    if (remaining.length === 0) setSelectedPerson(null);
+  }
+
+  // ── Detail view: bulk unassign ────────────────────────────────────
+  async function handleBulkUnassign() {
+    const faceIds = getSelectedFaceIds();
     if (faceIds.length === 0) return;
     try {
       for (const faceId of faceIds) {
         await unassignFaceFromPerson(faceId);
       }
       onNotice(`Removed ${faceIds.length} face(s) from person`);
-      const remaining = faces.filter((f) => !faceIds.includes(f.id));
-      setFaces(remaining);
-      detailClearSelection();
-      if (selectedPerson) scrubFacesCache.current.delete(selectedPerson.id);
-      loadPersons();
-      if (remaining.length === 0) {
-        setSelectedPerson(null);
-      }
+      applyFaceRemoval(faceIds);
     } catch (err) {
       onError(String(err));
     }
@@ -287,25 +272,14 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
 
   // ── Detail view: reassign faces to another person ─────────────────
   async function handleReassignFaces(targetPersonId: number) {
-    const faceIds = [...detailSelected]
-      .sort((a, b) => a - b)
-      .filter((i) => i < faces.length)
-      .map((i) => faces[i].id);
+    const faceIds = getSelectedFaceIds();
     if (faceIds.length === 0) return;
     setDetailContextMenu(null);
     try {
       await reassignFacesToPerson(faceIds, targetPersonId);
       const targetPerson = persons.find((p) => p.id === targetPersonId);
       onNotice(`Moved ${faceIds.length} face(s) to ${targetPerson?.name ?? "person"}`);
-      const remaining = faces.filter((f) => !faceIds.includes(f.id));
-      setFaces(remaining);
-      detailClearSelection();
-      if (selectedPerson) scrubFacesCache.current.delete(selectedPerson.id);
-      scrubFacesCache.current.delete(targetPersonId);
-      loadPersons();
-      if (remaining.length === 0) {
-        setSelectedPerson(null);
-      }
+      applyFaceRemoval(faceIds, targetPersonId);
     } catch (err) {
       onError(String(err));
     }
@@ -533,12 +507,12 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
   // ── Person detail view ────────────────────────────────────────────
   if (selectedPerson) {
     return (
-      <div className="faces-view">
-        <div className="faces-toolbar">
+      <div className="tool-view">
+        <div className="tool-toolbar">
           <button type="button" onClick={() => { setSelectedPerson(null); detailClearSelection(); }}>
             Back to People
           </button>
-          <div className="faces-stats">
+          <div className="tool-toolbar-stats">
             <strong>{selectedPerson.name}</strong> &mdash; {faces.length} face
             {faces.length !== 1 ? "s" : ""}
             {detailSelected.size > 0 && (
@@ -553,10 +527,10 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
           </button>
         </div>
 
-        <div className="faces-body">
-          {facesLoading && <div className="faces-loading">Loading faces...</div>}
+        <div className="tool-body">
+          {facesLoading && <div className="tool-loading">Loading faces...</div>}
           {!facesLoading && faces.length === 0 && (
-            <div className="faces-empty">No faces for this person.</div>
+            <div className="tool-empty">No faces for this person.</div>
           )}
           {!facesLoading && faces.length > 0 && (
             <div className="faces-detail-grid">
@@ -601,9 +575,9 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
 
   // ── Person grid view ──────────────────────────────────────────────
   return (
-    <div className="faces-view">
-      <div className="faces-toolbar">
-        <div className="faces-stats">
+    <div className="tool-view">
+      <div className="tool-toolbar">
+        <div className="tool-toolbar-stats">
           <strong>{persons.length}</strong> {persons.length !== 1 ? "people" : "person"},{" "}
           <strong>{totalFaces}</strong> face{totalFaces !== 1 ? "s" : ""} total
         </div>
@@ -621,10 +595,10 @@ export default function FacesView({ onBack, onSelectPerson, onPreviewFile, onNot
 
       {renderProgress()}
 
-      <div className="faces-body">
-        {loading && <div className="faces-loading">Loading...</div>}
+      <div className="tool-body">
+        {loading && <div className="tool-loading">Loading...</div>}
         {!loading && persons.length === 0 && !isReclustering && (
-          <div className="faces-empty">
+          <div className="tool-empty">
             No faces clustered yet. Right-click a folder and select &quot;Detect Faces&quot; to
             scan for faces.
           </div>

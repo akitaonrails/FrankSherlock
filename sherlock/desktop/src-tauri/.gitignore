@@ -3,5 +3,5 @@
 /target/
 /gen/schemas
 
-# Downloaded PDFium binary (fetched by scripts/download-pdfium.sh)
+# Downloaded native libraries (fetched by scripts/download-pdfium.sh and download-onnxruntime.sh)
 /lib/

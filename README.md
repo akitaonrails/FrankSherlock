@@ -47,9 +47,10 @@ The MSI installer is not signed with a code-signing certificate. Windows SmartSc
 ## Building from source
 
 ```bash
-# 1. Download the PDFium library for your platform
+# 1. Download native libraries for your platform
 cd sherlock/desktop/src-tauri
 bash scripts/download-pdfium.sh
+bash scripts/download-onnxruntime.sh
 
 # 2. Install frontend dependencies
 cd sherlock/desktop
