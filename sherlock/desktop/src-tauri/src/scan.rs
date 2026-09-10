@@ -175,6 +175,7 @@ fn run_scan_job_internal(
     let mut unchanged = job.unchanged;
     let mut used_moved_ids = HashSet::new();
     let mut last_cursor: Option<String> = job.cursor_rel_path.clone();
+    let mut skipped_unreadable: u64 = 0;
     const UNCHANGED_BATCH_SIZE: usize = 200;
 
     // Determine whether to skip the thumbnailing phase (already done on a previous run).
@@ -268,10 +269,53 @@ fn run_scan_job_internal(
                 }
             }
 
-            // Compute fingerprint lazily for new/modified files (deferred from discovery)
+            // Compute fingerprint lazily for new/modified files (deferred from discovery).
+            //
+            // A file that cannot be read (restrictive ACLs, an exclusive lock held by
+            // another process, a cloud placeholder that fails to hydrate) must not abort
+            // the whole job: skip it, record why, and keep going. Discovery is already
+            // tolerant of unreadable entries, so this keeps phase 2 consistent with it.
             let fingerprint = match &probe.fingerprint {
                 Some(fp) => fp.clone(),
-                None => fingerprint_file(Path::new(&probe.abs_path), probe.size_bytes as u64)?,
+                None => match fingerprint_file(Path::new(&probe.abs_path), probe.size_bytes as u64)
+                {
+                    Ok(fp) => fp,
+                    Err(err) => {
+                        log::warn!(
+                            "Scan job {}: skipping unreadable file {}: {}",
+                            job_id,
+                            probe.abs_path,
+                            err,
+                        );
+                        // A modified file already has an index entry; refresh
+                        // its scan marker so end-of-scan cleanup does not
+                        // soft-delete a file that still exists on disk.
+                        if matches!(probe.status, FileStatus::Modified) {
+                            db::touch_file_scan_markers_batch(
+                                db_path,
+                                job.root_id,
+                                &[probe.rel_path.as_str()],
+                                job.scan_marker,
+                            )?;
+                        }
+                        skipped_unreadable += 1;
+                        processed_files += 1;
+                        last_cursor = Some(probe.rel_path.clone());
+                        db::checkpoint_scan_job(
+                            db_path,
+                            job_id,
+                            "thumbnailing",
+                            total_files,
+                            processed_files,
+                            last_cursor.as_deref(),
+                            added,
+                            modified,
+                            moved,
+                            unchanged,
+                        )?;
+                        continue;
+                    }
+                },
             };
 
             match probe.status {
@@ -392,6 +436,14 @@ fn run_scan_job_internal(
                 moved,
                 unchanged,
             )?;
+        }
+
+        if skipped_unreadable > 0 {
+            log::warn!(
+                "Scan job {}: {} file(s) skipped because they could not be opened",
+                job_id,
+                skipped_unreadable,
+            );
         }
 
         log::info!(
@@ -932,6 +984,117 @@ mod tests {
             model: "qwen2.5vl:7b".to_string(),
             pdfium_lib_path: tmp.path().join("lib"),
         }
+    }
+
+    /// An unreadable file must not abort the job: the scan completes and the
+    /// readable files around it are still indexed.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_file_is_skipped_not_fatal() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root_dir = tempfile::tempdir().expect("tempdir");
+        let db_dir = tempfile::tempdir().expect("dbdir");
+        let db_path = db_dir.path().join("index.sqlite");
+        db::init_database(&db_path).expect("init");
+
+        // "a.jpg" sorts before "b.jpg", so the unreadable file is hit first —
+        // the exact shape of the bug this guards against.
+        let unreadable = root_dir.path().join("a.jpg");
+        write_test_image(&unreadable, 0xAA);
+        let readable = root_dir.path().join("b.jpg");
+        write_test_image(&readable, 0xBB);
+
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000))
+            .expect("chmod");
+
+        // root bypasses DAC, so mode 0o000 would still open and the test would
+        // assert nothing. Skip rather than report a false pass.
+        if File::open(&unreadable).is_ok() {
+            let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+            eprintln!("skipping: this process can read mode-000 files (running as root?)");
+            return;
+        }
+
+        let job = start_or_resume_scan_job(&db_path, root_dir.path().to_str().expect("str"))
+            .expect("job");
+        let ctx = make_scan_context(&db_path);
+        let summary = run_scan_job_internal(&ctx, job.id, None, None, true)
+            .expect("scan must not fail on an unreadable file");
+
+        // Restore permissions so tempdir cleanup succeeds.
+        let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+
+        assert_eq!(
+            summary.added, 1,
+            "the readable file should still be indexed"
+        );
+
+        let indexed = db::load_existing_files(&db_path, job.root_id).expect("load");
+        let paths: Vec<&str> = indexed.iter().map(|f| f.rel_path.as_str()).collect();
+        assert_eq!(paths, vec!["b.jpg"]);
+    }
+
+    /// A modified file that becomes unreadable keeps its existing index entry:
+    /// end-of-scan cleanup must not soft-delete a file that still exists on
+    /// disk but cannot currently be opened.
+    #[cfg(unix)]
+    #[test]
+    fn skipped_modified_file_is_not_marked_deleted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root_dir = tempfile::tempdir().expect("tempdir");
+        let db_dir = tempfile::tempdir().expect("dbdir");
+        let db_path = db_dir.path().join("index.sqlite");
+        db::init_database(&db_path).expect("init");
+
+        let img = root_dir.path().join("a.jpg");
+        write_test_image(&img, 0xAA);
+
+        let ctx = make_scan_context(&db_path);
+        let first_job = start_or_resume_scan_job(&db_path, root_dir.path().to_str().expect("str"))
+            .expect("first job");
+        let summary =
+            run_scan_job_internal(&ctx, first_job.id, None, None, true).expect("first scan");
+        assert_eq!(summary.added, 1);
+
+        // Grow the file so the rescan sees it as modified, then make it unreadable.
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&img)
+            .expect("open for append");
+        f.write_all(&[0xAB]).expect("append");
+        drop(f);
+        std::fs::set_permissions(&img, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+
+        // root bypasses DAC, so mode 0o000 would still open and the test would
+        // assert nothing. Skip rather than report a false pass.
+        if File::open(&img).is_ok() {
+            let _ = std::fs::set_permissions(&img, std::fs::Permissions::from_mode(0o644));
+            eprintln!("skipping: this process can read mode-000 files (running as root?)");
+            return;
+        }
+
+        let second_job = start_or_resume_scan_job(&db_path, root_dir.path().to_str().expect("str"))
+            .expect("second job");
+        let summary = run_scan_job_internal(&ctx, second_job.id, None, None, true)
+            .expect("scan must not fail on an unreadable file");
+
+        // Restore permissions so tempdir cleanup succeeds.
+        let _ = std::fs::set_permissions(&img, std::fs::Permissions::from_mode(0o644));
+
+        assert_eq!(
+            summary.deleted, 0,
+            "a temporarily unreadable file must not be treated as deleted"
+        );
+
+        let indexed = db::load_existing_files(&db_path, second_job.root_id).expect("load");
+        let paths: Vec<&str> = indexed.iter().map(|f| f.rel_path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["a.jpg"],
+            "the existing index entry must survive the skip"
+        );
     }
 
     #[test]
